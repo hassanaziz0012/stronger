@@ -20,7 +20,11 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.FitnessCenter
@@ -64,8 +68,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.stronger.container
+import app.stronger.data.rirLabel
 import app.stronger.data.AppSettings
 import app.stronger.data.BodyPart
+import app.stronger.data.Equipment
+import app.stronger.data.SessionExercise
+import app.stronger.data.SessionSet
+import app.stronger.data.Trend
+import app.stronger.data.progressStatus
+import app.stronger.data.repTarget
+import app.stronger.data.sessionScore
+import app.stronger.data.targetFor
+import app.stronger.ui.plural
+import app.stronger.ui.workout.TargetsSheet
 import app.stronger.data.ExerciseEntity
 import app.stronger.data.ExerciseUsage
 import app.stronger.data.SetType
@@ -284,7 +299,7 @@ fun ExerciseDetailScreen(id: Long, nav: Nav) {
                 }
             }
             when (tab) {
-                0 -> SummaryTab(e, sessions, settings)
+                0 -> SummaryTab(e, sessions, settings, onSaveExercise = { scope.launch { c.repo.updateExercise(it) } })
                 1 -> HistoryTab(e, sessions, settings, nav)
                 else -> RecordsTab(e, sessions, settings)
             }
@@ -314,8 +329,10 @@ fun ExerciseDetailScreen(id: Long, nav: Nav) {
 }
 
 @Composable
-private fun SummaryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, settings: AppSettings) {
+private fun SummaryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, settings: AppSettings, onSaveExercise: (ExerciseEntity) -> Unit) {
     val metrics = metricsFor(e.tracking)
+    var targets by remember { mutableStateOf(false) }
+    if (targets) TargetsSheet(e, settings.unit, onSave = { targets = false; onSaveExercise(it) }, onDismiss = { targets = false })
     var metric by remember(e.tracking) { mutableStateOf(metrics.first()) }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -334,6 +351,7 @@ private fun SummaryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, setti
         if (e.notes.isNotBlank()) item {
             Text(e.notes, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        if (e.tracking != TrackingType.DISTANCE_DURATION) item { ProgressCard(e, sessions, settings) { targets = true } }
         if (sessions.isEmpty()) {
             item { EmptyState(Icons.Outlined.FitnessCenter, "Not done yet", "Log this exercise in a workout and your progress shows up here.") }
             return@LazyColumn
@@ -384,6 +402,87 @@ private fun SummaryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, setti
     }
 }
 
+/** Plateau status, rep targets and what to aim for next time. */
+@Composable
+private fun ProgressCard(e: ExerciseEntity, sessions: List<ExerciseSession>, settings: AppSettings, onEditTargets: () -> Unit) {
+    val unit = settings.unit
+    val status = remember(sessions) { progressStatus(sessions.map { it.startedAt to sessionScore(it.sets, e.tracking) }) }
+    val target = e.repTarget(unit)
+    val next = remember(sessions, e, unit) {
+        val last = sessions.firstOrNull() ?: return@remember null
+        val ex = SessionExercise(key = 0, exerciseId = e.id, sets = last.sets.map { SessionSet(key = 0, type = it.type) })
+        ex.sets.indices.mapNotNull { targetFor(ex, it, last.sets, e, unit) }.takeIf { it.isNotEmpty() }
+    }
+    val canTarget = e.tracking == TrackingType.WEIGHT_REPS || e.tracking == TrackingType.REPS
+    Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.padding(20.dp).fillMaxWidth()) {
+            Text("Progress", style = MaterialTheme.typography.titleMediumEmphasized)
+            VSpace(8.dp)
+            val (headline, detail, color) = when (status?.trend) {
+                null -> Triple(
+                    "Not enough recent data",
+                    "After four sessions within ten weeks, you'll see here whether this lift is still moving.",
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Trend.PROGRESSING -> Triple(
+                    "Progressing",
+                    if (status.sessionsSinceBest == 0) "New best last session." else "Best was ${plural(status.sessionsSinceBest, "session")} ago.",
+                    MaterialTheme.colorScheme.primary,
+                )
+                Trend.STALLED -> Triple(
+                    "Stalled",
+                    "No new best in ${status.sessionsSinceBest} sessions. Try taking about 10% off and building back up, changing the rep range, or a similar variation for a few weeks.",
+                    MaterialTheme.colorScheme.tertiary,
+                )
+                Trend.REGRESSING -> Triple(
+                    "Going backwards",
+                    "Your last two sessions were well under your best. That's usually fatigue, sleep or food rather than this exercise; a lighter week tends to fix it.",
+                    MaterialTheme.colorScheme.error,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    when (status?.trend) {
+                        Trend.PROGRESSING -> Icons.AutoMirrored.Filled.TrendingUp
+                        Trend.STALLED -> Icons.AutoMirrored.Filled.TrendingFlat
+                        Trend.REGRESSING -> Icons.AutoMirrored.Filled.TrendingDown
+                        null -> Icons.Filled.HourglassEmpty
+                    },
+                    null, tint = color,
+                )
+                HSpace(8.dp)
+                Text(headline, style = MaterialTheme.typography.titleSmallEmphasized, color = color)
+            }
+            Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (canTarget) {
+                VSpace(16.dp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Rep targets", style = MaterialTheme.typography.titleSmallEmphasized)
+                        Text(
+                            when {
+                                target == null -> "Off. Set a rep range and Stronger suggests the weight and reps for every set."
+                                e.tracking == TrackingType.REPS -> "${target.min}–${target.max} reps"
+                                else -> "${target.min}–${target.max} reps, then ${formatWeight(target.incrementKg, unit)} ${unit.label} ${if (e.equipment == Equipment.ASSISTED_BODYWEIGHT) "less assistance" else "more"}"
+                            },
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = onEditTargets) { Text(if (target == null) "Set" else "Edit") }
+                }
+                if (next != null) {
+                    VSpace(8.dp)
+                    Text("Next time", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        next.joinToString("  ·  ") { formatSet(it, e.tracking, unit) },
+                        style = MaterialTheme.typography.titleMediumEmphasized, color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun HistoryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, settings: AppSettings, nav: Nav) {
     if (sessions.isEmpty()) {
@@ -405,7 +504,7 @@ private fun HistoryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, setti
                         val label = if (set.type == SetType.WARMUP) "W" else if (set.type == SetType.NORMAL) "${++n}" else { n++; set.type.short }
                         Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(label, Modifier.padding(end = 12.dp).size(width = 20.dp, height = 20.dp), style = MaterialTheme.typography.labelLargeEmphasized, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(formatSet(set, e.tracking, settings.unit), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            Text(formatSet(set, e.tracking, settings.unit) + (set.rir?.let { " · ${rirLabel(it)}" } ?: ""), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                             if (e.tracking == TrackingType.WEIGHT_REPS && set.oneRm > 0) {
                                 Text("${formatOneRm(set.oneRm, settings.unit)} 1RM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }

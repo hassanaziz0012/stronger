@@ -1,5 +1,6 @@
 package app.stronger.ui
 
+import app.stronger.data.MeasureKind
 import app.stronger.data.SetEntity
 import app.stronger.data.SessionSet
 import app.stronger.data.TrackingType
@@ -26,6 +27,31 @@ fun formatWeight(kg: Double?, unit: WeightUnit): String =
 
 /** Estimated maxes are fuzzy anyway; one decimal is plenty. */
 fun formatOneRm(kg: Double, unit: WeightUnit): String = (Math.round(unit.fromKg(kg) * 10) / 10.0).clean()
+
+/** Measurements display in the user's system: kg/cm or lbs/in; body fat is always %. */
+fun measureUnit(kind: MeasureKind, unit: WeightUnit): String = when {
+    kind == MeasureKind.WEIGHT -> unit.label
+    kind == MeasureKind.BODY_FAT -> "%"
+    unit == WeightUnit.LB -> "in"
+    else -> "cm"
+}
+
+fun measureToDisplay(kind: MeasureKind, value: Double, unit: WeightUnit): Double = when {
+    kind == MeasureKind.WEIGHT -> unit.fromKg(value)
+    kind.isLength && unit == WeightUnit.LB -> value / 2.54
+    else -> value
+}
+
+fun measureFromDisplay(kind: MeasureKind, value: Double, unit: WeightUnit): Double = when {
+    kind == MeasureKind.WEIGHT -> unit.toKg(value)
+    kind.isLength && unit == WeightUnit.LB -> value * 2.54
+    else -> value
+}
+
+fun formatMeasure(kind: MeasureKind, value: Double, unit: WeightUnit, withUnit: Boolean = true): String {
+    val n = measureToDisplay(kind, value, unit).clean(1)
+    return if (!withUnit) n else if (kind == MeasureKind.BODY_FAT) "$n%" else "$n ${measureUnit(kind, unit)}"
+}
 
 fun formatWeightWithUnit(kg: Double, unit: WeightUnit) = "${formatWeight(kg, unit)} ${unit.label}"
 

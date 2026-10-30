@@ -29,3 +29,6 @@ Prefer `uiautomator dump` for finding tap targets; shrink screenshots before rea
 - Don't put `SwipeToDismissBox` rows inside a `Modifier.height(IntrinsicSize.Min)` parent: it loops forever in layout and ANRs.
 - The live workout is `ActiveWorkout` (mirrored to `files/active_session.json`); templates and history edits use `LocalEditor`. Both implement `SessionStore`, and all edits are pure functions in `SessionOps.kt`.
 - Weights are stored in kg; convert only for display/input.
+- Room schema changes need a version bump plus an `AutoMigration` (schemas are exported to `app/schemas`); the phone has real data.
+- `ModalBottomSheet`s with text fields need `skipPartiallyExpanded = true` and `imePadding()`, or the keyboard hides their buttons.
+- Health Connect writes use `clientRecordId`s (`workout-<id>`, `measurement-<id>`) so re-syncs replace rather than duplicate.

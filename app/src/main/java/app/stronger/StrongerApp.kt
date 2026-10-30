@@ -6,6 +6,7 @@ import app.stronger.data.ActiveWorkout
 import app.stronger.data.AppDatabase
 import app.stronger.data.Repository
 import app.stronger.data.SettingsStore
+import app.stronger.health.HealthSync
 import app.stronger.service.WorkoutService
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -26,7 +27,8 @@ class AppContainer(private val app: Application) {
     val scope = MainScope()
     val db = AppDatabase.create(app)
     val settings = SettingsStore(app)
-    val repo = Repository(db, settings)
+    val health = HealthSync(app, db, settings, scope)
+    val repo = Repository(db, settings, health)
     val active = ActiveWorkout(app, repo, scope)
 
     init {

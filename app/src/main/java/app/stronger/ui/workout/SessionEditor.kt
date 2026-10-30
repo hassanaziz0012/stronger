@@ -71,9 +71,12 @@ import app.stronger.data.Repository
 import app.stronger.data.Session
 import app.stronger.data.SessionStore
 import app.stronger.data.SetEntity
+import app.stronger.data.SetType
+import app.stronger.data.Bests
 import app.stronger.data.addExercises
 import app.stronger.data.doneSetCount
 import app.stronger.data.replaceExercise
+import app.stronger.data.tracksEffort
 import app.stronger.data.updateSet
 import app.stronger.ui.Nav
 import app.stronger.ui.components.VSpace
@@ -205,6 +208,9 @@ fun SessionEditorScreen(
     var confirmFinish by remember { mutableStateOf(false) }
     var confirmDiscard by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
+    // The set whose "reps left?" picker is open, if any.
+    var effortKey by remember { mutableStateOf<Long?>(null) }
+    val bests by (if (live) c.active.bests else remember { MutableStateFlow(emptyMap<Long, Bests>()) }).collectAsStateWithLifecycle()
     val now = rememberNow()
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -260,6 +266,9 @@ fun SessionEditorScreen(
                         session = session,
                         info = info,
                         previous = previous[ex.exerciseId],
+                        bests = bests[ex.exerciseId],
+                        effortKey = effortKey,
+                        onEffortKey = { effortKey = it },
                         settings = settings,
                         mode = mode,
                         store = store,
@@ -267,9 +276,16 @@ fun SessionEditorScreen(
                         onReplace = { replacing = ex.key },
                         onOpenExercise = { onOpenExercise(ex.exerciseId) },
                         onToggleSet = { e, st ->
+                            val set = ex.sets.firstOrNull { it.key == st }
                             // Live workouts complete sets through ActiveWorkout for hints, records and rest.
                             if (live) c.active.toggleSet(e, st)
                             else store.update { it.updateSet(e, st) { x -> x.copy(done = !x.done) } }
+                            // Ask how hard a working set was right after ticking it.
+                            effortKey = when {
+                                set == null || set.done -> effortKey.takeIf { it != st }
+                                live && settings.trackEffort && set.type != SetType.WARMUP && tracksEffort(info) -> st
+                                else -> effortKey
+                            }
                         },
                         modifier = Modifier.animateItem(),
                     )

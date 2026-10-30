@@ -46,6 +46,20 @@ enum class WeightUnit(val label: String, val perKg: Double) {
     LB("lbs", 2.2046226218),
 }
 
+/** Body measurements. Weight is stored in kg, body fat in %, and lengths in cm. */
+enum class MeasureKind(val label: String, val isLength: Boolean = false) {
+    WEIGHT("Body weight"),
+    BODY_FAT("Body fat"),
+    WAIST("Waist", true),
+    CHEST("Chest", true),
+    SHOULDERS("Shoulders", true),
+    ARMS("Arms", true),
+    THIGHS("Thighs", true),
+    CALVES("Calves", true),
+    HIPS("Hips", true),
+    NECK("Neck", true),
+}
+
 /** Personal-record kinds, stored as a bitmask on each logged set. */
 object Pr {
     const val WEIGHT = 1
@@ -64,6 +78,11 @@ object Pr {
         if (mask and DISTANCE != 0) add("Distance")
     }
 }
+
+/** RIR at or above this is recorded and shown as "4+". */
+const val RIR_MAX = 4
+
+fun rirLabel(rir: Int) = if (rir >= RIR_MAX) "$RIR_MAX+ RIR" else "$rir RIR"
 
 /** Epley estimate, the same formula most lifting apps show. Single reps are their own max. */
 fun estimatedOneRepMax(weightKg: Double, reps: Int): Double = when {
@@ -105,6 +124,8 @@ data class SessionSet(
     val distanceKm: Double? = null,
     val done: Boolean = false,
     val prMask: Int = 0,
+    /** Reps in reserve the lifter reported; 4 means "4 or more". Null when not given. */
+    val rir: Int? = null,
 )
 
 object Keys {

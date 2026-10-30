@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // A workout restored after process death needs its service back.
         if (container.active.isActive) WorkoutService.start(this)
+        container.health.onForeground()
     }
 
     override fun onNewIntent(intent: Intent) {

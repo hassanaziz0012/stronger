@@ -56,6 +56,7 @@ import app.stronger.ui.exercises.ExerciseDetailScreen
 import app.stronger.ui.exercises.ExercisesScreen
 import app.stronger.ui.history.HistoryScreen
 import app.stronger.ui.history.WorkoutDetailScreen
+import app.stronger.ui.profile.BodyScreen
 import app.stronger.ui.profile.ProfileScreen
 import app.stronger.ui.profile.SettingsScreen
 import app.stronger.ui.workout.EditorMode
@@ -77,6 +78,7 @@ import kotlinx.serialization.Serializable
 @Serializable data class EditWorkout(val id: Long)
 @Serializable data class Finished(val id: Long)
 @Serializable object SettingsRoute
+@Serializable object BodyRoute
 
 /** Navigation actions screens may take, so they never touch the controller directly. */
 class Nav(private val c: NavHostController) {
@@ -87,6 +89,7 @@ class Nav(private val c: NavHostController) {
     fun workout(id: Long) = c.navigate(WorkoutDetail(id))
     fun editWorkout(id: Long) = c.navigate(EditWorkout(id))
     fun settings() = c.navigate(SettingsRoute)
+    fun body() = c.navigate(BodyRoute)
     fun finished(id: Long) = c.navigate(Finished(id)) { popUpTo(LiveWorkout) { inclusive = true } }
     fun tab(route: Any) = c.navigate(route) {
         popUpTo(c.graph.findStartDestination().id) { saveState = true }
@@ -162,6 +165,7 @@ fun StrongerNav(openWorkoutRequests: StateFlow<Int>) {
             composable<WorkoutDetail> { WorkoutDetailScreen(it.toRoute<WorkoutDetail>().id, nav) }
             composable<Finished> { FinishedScreen(it.toRoute<Finished>().id, nav) }
             composable<SettingsRoute> { SettingsScreen(nav) }
+            composable<BodyRoute> { BodyScreen(nav) }
         }
     }
 }

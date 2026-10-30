@@ -10,6 +10,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.IBinder
@@ -92,14 +95,7 @@ class WorkoutService : Service() {
                 VibrationEffect.createWaveform(longArrayOf(0, 250, 120, 250, 120, 450), -1)
             )
         }
-        if (s.timerSound) {
-            runCatching {
-                RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))?.apply {
-                    audioAttributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()
-                    play()
-                }
-            }
-        }
+        if (s.timerSound) playChime()
         nm.notify(
             ALERT_ID,
             Notification.Builder(this, ALERT_CHANNEL)
@@ -112,6 +108,30 @@ class WorkoutService : Service() {
                 .setCategory(Notification.CATEGORY_ALARM)
                 .build(),
         )
+    }
+
+    /**
+     * Plays the notification sound as a notification event (alarm usage mutes media on headphones
+     * while it plays) and asks other apps to duck rather than pause until it's done.
+     */
+    private fun playChime() {
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val audio = getSystemService(AudioManager::class.java)
+        val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attrs).build()
+        val player = MediaPlayer()
+        val done = { player.release(); audio.abandonAudioFocusRequest(focus); Unit }
+        runCatching {
+            player.setAudioAttributes(attrs)
+            player.setDataSource(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+            player.setOnCompletionListener { done() }
+            player.setOnErrorListener { _, _, _ -> done(); true }
+            player.prepare()
+            audio.requestAudioFocus(focus)
+            player.start()
+        }.onFailure { done() }
     }
 
     private fun nextSetText(session: Session?): String? {

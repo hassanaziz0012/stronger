@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +27,12 @@ data class AppSettings(
     /** Plate sizes in the user's unit, heaviest first. */
     val plates: List<Double> = listOf(25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25),
     val weeklyGoal: Int = 3,
+    /** Sync workouts and body measurements with Health Connect. */
+    val healthConnect: Boolean = false,
+    /** Ask for reps in reserve after each working set. */
+    val trackEffort: Boolean = true,
+    /** When the deload suggestion was last dismissed. */
+    val deloadDismissedAt: Long = 0,
 )
 
 class SettingsStore(private val context: Context) {
@@ -38,7 +45,11 @@ class SettingsStore(private val context: Context) {
         val bar = doublePreferencesKey("bar")
         val plates = stringPreferencesKey("plates")
         val goal = intPreferencesKey("goal")
+        val health = booleanPreferencesKey("health_connect")
+        val effort = booleanPreferencesKey("track_effort")
+        val deloadDismissed = longPreferencesKey("deload_dismissed")
         val seeded = booleanPreferencesKey("seeded")
+        val hcToken = stringPreferencesKey("hc_changes_token")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { it.toSettings() }
@@ -54,6 +65,9 @@ class SettingsStore(private val context: Context) {
             barWeightKg = this[K.bar] ?: d.barWeightKg,
             plates = this[K.plates]?.split(',')?.mapNotNull { it.toDoubleOrNull() } ?: d.plates,
             weeklyGoal = this[K.goal] ?: d.weeklyGoal,
+            healthConnect = this[K.health] ?: d.healthConnect,
+            trackEffort = this[K.effort] ?: d.trackEffort,
+            deloadDismissedAt = this[K.deloadDismissed] ?: d.deloadDismissedAt,
         )
     }
 
@@ -70,9 +84,18 @@ class SettingsStore(private val context: Context) {
             p[K.bar] = s.barWeightKg
             p[K.plates] = s.plates.joinToString(",")
             p[K.goal] = s.weeklyGoal
+            p[K.health] = s.healthConnect
+            p[K.effort] = s.trackEffort
+            p[K.deloadDismissed] = s.deloadDismissedAt
         }
     }
 
     suspend fun isSeeded(): Boolean = context.dataStore.data.first()[K.seeded] == true
     suspend fun markSeeded() { context.dataStore.edit { it[K.seeded] = true } }
+
+    /** Health Connect changes token for incremental body-measurement imports. */
+    suspend fun healthToken(): String? = context.dataStore.data.first()[K.hcToken]
+    suspend fun setHealthToken(token: String?) {
+        context.dataStore.edit { if (token == null) it.remove(K.hcToken) else it[K.hcToken] = token }
+    }
 }

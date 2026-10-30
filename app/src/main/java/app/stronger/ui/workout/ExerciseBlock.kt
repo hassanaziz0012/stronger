@@ -31,10 +31,20 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.outlined.StickyNote2
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.ToggleButton
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconToggleButton
@@ -57,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +78,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -86,6 +98,15 @@ import app.stronger.data.SetType
 import app.stronger.data.TrackingType
 import app.stronger.data.addSet
 import app.stronger.data.hintFor
+import app.stronger.data.Bests
+import app.stronger.data.RIR_MAX
+import app.stronger.data.estimateRir
+import app.stronger.data.tracksEffort
+import app.stronger.data.readyToProgress
+import app.stronger.data.repTarget
+import app.stronger.data.targetFor
+import app.stronger.container
+import kotlinx.coroutines.launch
 import app.stronger.data.previousFor
 import app.stronger.data.moveExercise
 import app.stronger.data.removeExercise
@@ -108,6 +129,9 @@ fun ExerciseBlock(
     session: Session,
     info: ExerciseEntity?,
     previous: List<SetEntity>?,
+    bests: Bests?,
+    effortKey: Long?,
+    onEffortKey: (Long?) -> Unit,
     settings: AppSettings,
     mode: EditorMode,
     store: SessionStore,
@@ -124,6 +148,9 @@ fun ExerciseBlock(
     var restSheet by remember { mutableStateOf(false) }
     var supersetPicker by remember { mutableStateOf(false) }
     var plates by remember { mutableStateOf(false) }
+    var targets by remember { mutableStateOf(false) }
+    val repTarget = info?.repTarget(settings.unit)
+    val canTarget = info != null && mode !is EditorMode.History && (tracking == TrackingType.WEIGHT_REPS || tracking == TrackingType.REPS)
     val superset = ex.supersetId != null
     val restSeconds = ex.restSeconds ?: info?.restSeconds ?: settings.defaultRestSeconds
 
@@ -162,6 +189,27 @@ fun ExerciseBlock(
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 2, overflow = TextOverflow.Ellipsis,
                         )
+                        if (repTarget != null && mode !is EditorMode.History) {
+                            val ready = live && readyToProgress(previous, repTarget)
+                            Row(
+                                Modifier.padding(top = 2.dp).clip(RoundedCornerShape(8.dp)).clickable { targets = true },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Filled.TrackChanges, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    " ${repTarget.min}–${repTarget.max} reps",
+                                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (ready) Text(
+                                    when {
+                                        tracking == TrackingType.REPS -> " · top of range, go harder"
+                                        info?.equipment == Equipment.ASSISTED_BODYWEIGHT -> " · less assistance today"
+                                        else -> " · +${formatWeight(repTarget.incrementKg, settings.unit)} ${settings.unit.label} today"
+                                    },
+                                    style = MaterialTheme.typography.labelLargeEmphasized, color = MaterialTheme.colorScheme.tertiary,
+                                )
+                            }
+                        }
                     }
                     if (mode !is EditorMode.History) {
                         TextButton(onClick = { restSheet = true }) {
@@ -206,6 +254,10 @@ fun ExerciseBlock(
                                 text = { Text("Plate calculator") }, leadingIcon = { Icon(Icons.Filled.Calculate, null) },
                                 onClick = { menu = false; plates = true },
                             )
+                            if (canTarget) DropdownMenuItem(
+                                text = { Text("Rep targets") }, leadingIcon = { Icon(Icons.Filled.TrackChanges, null) },
+                                onClick = { menu = false; targets = true },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Exercise details") }, leadingIcon = { Icon(Icons.Filled.Info, null) },
                                 onClick = { menu = false; onOpenExercise() },
@@ -247,14 +299,28 @@ fun ExerciseBlock(
                         else -> { normalCount++; set.type.short }
                     }
                     key(set.key) {
+                        val target = if (live) targetFor(ex, i, previous, info, settings.unit) else null
                         SetRow(
                             set = set, label = label, tracking = tracking, settings = settings, mode = mode,
                             previous = previousFor(ex, i, previous),
-                            hint = hintFor(ex, i, previous),
+                            hint = target ?: hintFor(ex, i, previous),
+                            targeted = target != null,
                             onChange = { f -> store.update { it.updateSet(ex.key, set.key, f) } },
                             onToggle = { onToggleSet(ex.key, set.key) },
                             onDelete = { store.update { it.removeSet(ex.key, set.key) } },
+                            onEffort = if (set.done && set.type != SetType.WARMUP && mode !is EditorMode.Template && tracksEffort(info)) ({ onEffortKey(set.key) }) else null,
                         )
+                        AnimatedVisibility(set.done && set.key == effortKey) {
+                            EffortPicker(
+                                selected = set.rir,
+                                estimate = if (live) estimateRir(set, info, bests) else null,
+                                onPick = { r ->
+                                    store.update { it.updateSet(ex.key, set.key) { x -> x.copy(rir = r) } }
+                                    onEffortKey(null)
+                                },
+                                onDismiss = { onEffortKey(null) },
+                            )
+                        }
                     }
                 }
                 TextButton(
@@ -274,6 +340,15 @@ fun ExerciseBlock(
             current = ex.restSeconds, allowDefault = true, defaultSeconds = info?.restSeconds ?: settings.defaultRestSeconds,
             onPick = { v -> restSheet = false; store.update { it.updateExercise(ex.key) { e -> e.copy(restSeconds = v) } } },
             onDismiss = { restSheet = false },
+        )
+    }
+    if (targets && info != null) {
+        val c = LocalContext.current.container
+        val scope = rememberCoroutineScope()
+        TargetsSheet(
+            info, settings.unit,
+            onSave = { updated -> targets = false; scope.launch { c.repo.updateExercise(updated) } },
+            onDismiss = { targets = false },
         )
     }
     if (plates) {
@@ -338,9 +413,11 @@ private fun SetRow(
     mode: EditorMode,
     previous: SetEntity?,
     hint: SessionSet?,
+    targeted: Boolean,
     onChange: ((SessionSet) -> SessionSet) -> Unit,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
+    onEffort: (() -> Unit)?,
 ) {
     val live = mode == EditorMode.Live
     val unit = settings.unit
@@ -382,7 +459,16 @@ private fun SetRow(
                     Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).clickable { typeMenu = true },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(label, style = MaterialTheme.typography.titleSmallEmphasized, color = badgeColor)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(label, style = MaterialTheme.typography.titleSmallEmphasized, color = badgeColor)
+                        if (set.done && set.rir != null) {
+                            Text(
+                                "${if (set.rir >= RIR_MAX) "$RIR_MAX+" else set.rir} left",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 11.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false,
+                            )
+                        }
+                    }
                 }
                 if (set.prMask != 0 && set.done) {
                     Icon(
@@ -400,6 +486,12 @@ private fun SetRow(
                             onClick = { typeMenu = false; onChange { it.copy(type = t) } },
                         )
                     }
+                    if (onEffort != null) DropdownMenuItem(
+                        text = { Text("Reps in reserve") },
+                        leadingIcon = { Icon(Icons.Filled.Speed, null) },
+                        trailingIcon = { set.rir?.let { Text(if (it >= RIR_MAX) "$RIR_MAX+" else "$it") } },
+                        onClick = { typeMenu = false; onEffort() },
+                    )
                     HorizontalDivider()
                     DropdownMenuItem(
                         text = { Text("Delete set", color = MaterialTheme.colorScheme.error) },
@@ -423,24 +515,24 @@ private fun SetRow(
             }
             when (tracking) {
                 TrackingType.WEIGHT_REPS -> {
-                    NumberCell(formatWeight(set.weightKg, unit), formatWeight(hint?.weightKg, unit), true, set.done && live, Modifier.weight(1f)) { t ->
+                    NumberCell(formatWeight(set.weightKg, unit), formatWeight(hint?.weightKg, unit), true, set.done && live, targeted, Modifier.weight(1f)) { t ->
                         onChange { it.copy(weightKg = t.toDoubleOrNull()?.let(unit::toKg)) }
                     }
-                    NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, Modifier.weight(1f)) { t ->
+                    NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, targeted, Modifier.weight(1f)) { t ->
                         onChange { it.copy(reps = t.toIntOrNull()) }
                     }
                 }
-                TrackingType.REPS -> NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, Modifier.weight(1f)) { t ->
+                TrackingType.REPS -> NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, targeted, Modifier.weight(1f)) { t ->
                     onChange { it.copy(reps = t.toIntOrNull()) }
                 }
-                TrackingType.DURATION -> NumberCell(set.seconds?.toString() ?: "", hint?.seconds?.toString() ?: "", false, set.done && live, Modifier.weight(1f)) { t ->
+                TrackingType.DURATION -> NumberCell(set.seconds?.toString() ?: "", hint?.seconds?.toString() ?: "", false, set.done && live, targeted, Modifier.weight(1f)) { t ->
                     onChange { it.copy(seconds = t.toIntOrNull()) }
                 }
                 TrackingType.DISTANCE_DURATION -> {
-                    NumberCell(set.distanceKm?.clean() ?: "", hint?.distanceKm?.clean() ?: "", true, set.done && live, Modifier.weight(1f)) { t ->
+                    NumberCell(set.distanceKm?.clean() ?: "", hint?.distanceKm?.clean() ?: "", true, set.done && live, targeted, Modifier.weight(1f)) { t ->
                         onChange { it.copy(distanceKm = t.toDoubleOrNull()) }
                     }
-                    NumberCell(set.seconds?.let { (it / 60.0).clean() } ?: "", hint?.seconds?.let { (it / 60.0).clean() } ?: "", true, set.done && live, Modifier.weight(1f)) { t ->
+                    NumberCell(set.seconds?.let { (it / 60.0).clean() } ?: "", hint?.seconds?.let { (it / 60.0).clean() } ?: "", true, set.done && live, targeted, Modifier.weight(1f)) { t ->
                         onChange { it.copy(seconds = t.toDoubleOrNull()?.let { m -> (m * 60).roundToInt() }) }
                     }
                 }
@@ -470,6 +562,42 @@ private fun SetRow(
     }
 }
 
+/** "How many more could you have done?" asked under a set right after it's ticked. */
+@Composable
+private fun EffortPicker(selected: Int?, estimate: Int?, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 8.dp, top = 2.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Reps left?", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 8.dp),
+        )
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
+            (0..RIR_MAX).forEach { n ->
+                val text = if (n == RIR_MAX) "$RIR_MAX+" else "$n"
+                ToggleButton(
+                    checked = selected == n,
+                    onCheckedChange = { onPick(n) },
+                    shapes = when (n) {
+                        0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                        RIR_MAX -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                        else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                    },
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                    modifier = Modifier.weight(1f).height(36.dp).semantics {
+                        contentDescription = (if (n == 1) "1 rep in reserve" else "$text reps in reserve") + if (estimate == n && selected == null) ", estimated" else ""
+                    },
+                ) {
+                    // The guess is marked, not chosen: only what you tap is recorded.
+                    Text(if (estimate == n && selected == null) "~$text" else text, maxLines = 1)
+                }
+            }
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Close, "Skip", Modifier.size(18.dp)) }
+    }
+}
+
 private fun previousText(p: SetEntity, tracking: TrackingType, unit: app.stronger.data.WeightUnit): String = when (tracking) {
     TrackingType.WEIGHT_REPS -> "${formatWeight(p.weightKg ?: 0.0, unit)} × ${p.reps ?: 0}"
     TrackingType.REPS -> "× ${p.reps ?: 0}"
@@ -483,6 +611,7 @@ private fun NumberCell(
     hint: String,
     decimal: Boolean,
     done: Boolean,
+    targeted: Boolean,
     modifier: Modifier = Modifier,
     onChange: (String) -> Unit,
 ) {
@@ -517,7 +646,10 @@ private fun NumberCell(
                 if (text.isEmpty()) {
                     Text(
                         hint, style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f), textAlign = TextAlign.Center,
+                        // Targets read as a goal to hit; plain hints as a faint reminder of last time.
+                        color = if (targeted) MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                        textAlign = TextAlign.Center,
                     )
                 }
                 inner()

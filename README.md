@@ -16,7 +16,9 @@ A workout tracker for Android in the spirit of Strong, built with Jetpack Compos
 - Rest timer starts automatically when you complete a set (per-exercise or default rest, off per exercise). ±15 s and skip in-app and from the notification.
 - Supersets (rest starts after the last exercise in the round), exercise notes, reorder, replace, remove.
 - Live PR detection: a trophy appears on the set the moment you beat a record.
-- Ongoing notification, promoted to an Android 16 Live Update, with rest progress, "up next", ±15 s, skip and "Complete set". Vibration and sound when rest is over.
+- Effort: after ticking a working set, a "Reps left?" row asks for reps in reserve (0–4+), with a guess from your best est. 1RM marked "~". Only tapped answers are saved; change them from the set-number menu, or turn the question off in Settings. Easy sets (3+ in reserve) make targets jump twice as far, and effort counts towards plateau detection, so a lift that's getting harder shows up before the numbers drop. Strong's RPE column imports as RIR.
+- Rep targets (double progression): give an exercise a rep range and each working set suggests last time's weight with one more rep; once every set reaches the top, the weight goes up (2.5 kg / 5 lb by default, or your own step) and reps reset. Assisted exercises take assistance off instead. Targets replace stale template numbers.
+- Ongoing notification, promoted to an Android 16 Live Update, with rest progress, "up next", ±15 s, skip and "Complete set". Vibration and sound when rest is over; the sound ducks music instead of pausing it.
 - Keeps the screen on while a workout is open (setting).
 - Finishing shows a celebration screen with duration, volume, sets and new records.
 
@@ -24,15 +26,20 @@ A workout tracker for Android in the spirit of Strong, built with Jetpack Compos
 - 155 built-in exercises, named like Strong's ("Bench Press (Barbell)"), plus your own custom ones.
 - Search, body-part filters, sort by name, frequency or recency, A–Z headers.
 - Exercise page: progress chart (est. 1RM, max weight, volume; reps or time for other categories), full history, records and a rep-records table.
+- Plateau detection: each exercise shows whether it's progressing, stalled (no new best in 3+ sessions) or going backwards, with what to try, plus the rep targets and next session's sets. When several lifts stall at once, the Workout tab suggests a deload week.
 
 **History & profile**
 - Month calendar of workout days and month-grouped workout cards with best sets and PR counts.
 - Workout detail with every set and its 1RM; edit, delete, "do it again" or save as template.
 - Profile: all-time totals, workouts-per-week chart against your goal, recent records, plate calculator.
 
+**Body and health**
+- Body weight with a smoothed trend (so daily swings don't mislead) and 7/30/90-day changes, plus body fat and tape measurements (waist, chest, arms, …) in cm or inches.
+- Health Connect: finished workouts are written as exercise sessions (strength, calisthenics or the cardio type), body weight and body fat go both ways, and edits and deletes follow. Weight from scales and other apps comes in, including deletions. The profile shows the last week's cardio against 150 minutes, steps, resting heart rate and sleep.
+
 **Data**
 - Import from Strong: in Strong go to Settings → Export data, then pick the CSV in Stronger's Settings. Both the older comma and newer semicolon formats work. Exercises are matched by name, unknown ones become custom exercises, and records are recalculated. Re-importing skips workouts already present.
-- Back up everything to a JSON file and restore it on any phone.
+- Back up everything (including measurements) to a JSON file and restore it on any phone.
 - kg or lbs (stored internally as kg), default rest, weekly goal, bar weight and available plates.
 
 ## Build
@@ -52,7 +59,8 @@ The release build is signed with the debug key so it installs locally.
 ```
 app/src/main/java/app/stronger/
   data/      Room entities + DAOs, repository, the live workout (ActiveWorkout), pure session edits
-             and records (SessionOps), settings (DataStore), Strong CSV import and JSON backup
+             and records (SessionOps), targets, plateaus and trends (Insights), settings (DataStore), Strong CSV import and JSON backup
+  health/    HealthSync (Health Connect read/write) and the privacy screen it links to
   service/   WorkoutService: foreground notification / Live Update and rest alerts
   ui/        Navigation, theme, formatting, charts and one package per tab
 ```

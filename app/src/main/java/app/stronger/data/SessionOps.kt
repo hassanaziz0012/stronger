@@ -71,12 +71,12 @@ fun Session.removeSet(exKey: Long, setKey: Long) =
 
 /** A template keeps targets but never completion state. */
 fun Session.asTemplateExercises() = exercises.map { ex ->
-    ex.copy(sets = ex.sets.map { it.copy(done = false, prMask = 0) })
+    ex.copy(sets = ex.sets.map { it.copy(done = false, prMask = 0, rir = null) })
 }
 
 /** Starts a workout from template exercises with fresh keys. */
 fun List<SessionExercise>.freshCopy() = map { ex ->
-    ex.copy(key = Keys.next(), sets = ex.sets.map { it.copy(key = Keys.next(), done = false, prMask = 0) })
+    ex.copy(key = Keys.next(), sets = ex.sets.map { it.copy(key = Keys.next(), done = false, prMask = 0, rir = null) })
 }
 
 val Session.doneSetCount get() = exercises.sumOf { ex -> ex.sets.count { it.done } }
@@ -106,12 +106,125 @@ fun hintFor(ex: SessionExercise, index: Int, previous: List<SetEntity>?): Sessio
     return ex.sets.take(index).lastOrNull { it.weightKg != null || it.reps != null || it.seconds != null || it.distanceKm != null }
 }
 
+// ---- Targets ----
+
+/**
+ * A rep range to work in, and how much weight to add once every working set reaches the top of
+ * it. Set per exercise by the user.
+ */
+data class RepTarget(val min: Int, val max: Int, val incrementKg: Double)
+
+fun defaultIncrementKg(equipment: Equipment, unit: WeightUnit): Double = when (unit) {
+    WeightUnit.LB -> 5.0 / WeightUnit.LB.perKg
+    WeightUnit.KG -> if (equipment == Equipment.KETTLEBELL) 4.0 else 2.5
+}
+
+fun ExerciseEntity.repTarget(unit: WeightUnit): RepTarget? {
+    if (tracking != TrackingType.WEIGHT_REPS && tracking != TrackingType.REPS) return null
+    val min = repMin ?: return null
+    val max = repMax ?: return null
+    return RepTarget(min, max.coerceAtLeast(min), incrementKg ?: defaultIncrementKg(equipment, unit))
+}
+
+private fun SetType.isWorking() = this == SetType.NORMAL || this == SetType.FAILURE
+
+/** True when every working set last time reached the top of the range, so the weight goes up. */
+fun readyToProgress(previous: List<SetEntity>?, target: RepTarget): Boolean {
+    val working = previous.orEmpty().filter { it.type.isWorking() }
+    return working.isNotEmpty() && working.all { (it.reps ?: 0) >= target.max }
+}
+
+/** Reported this many reps in reserve or more on every working set: it was easy, so progress faster. */
+private const val EASY_RIR = 3
+
+private fun List<SetEntity>.allEasy() = isNotEmpty() && all { (it.rir ?: -1) >= EASY_RIR }
+
+/**
+ * Double progression: keep the weight and add a rep each session until every working set reaches
+ * the top of the range, then add [RepTarget.incrementKg] (take it off, for assisted exercises)
+ * and start again from the bottom. Warm-ups and drop sets have no target. When every working set
+ * was reported as easy ([EASY_RIR]+ reps in reserve), the jump is doubled: two reps, or two
+ * increments.
+ */
+fun targetFor(ex: SessionExercise, index: Int, previous: List<SetEntity>?, info: ExerciseEntity?, unit: WeightUnit): SessionSet? {
+    val target = info?.repTarget(unit) ?: return null
+    if (!ex.sets[index].type.isWorking()) return null
+    val working = previous.orEmpty().filter { it.type.isWorking() }
+    val prev = previousFor(ex, index, previous)?.takeIf { it.type.isWorking() } ?: working.lastOrNull() ?: return null
+    val ready = readyToProgress(previous, target)
+    val step = if (working.allEasy()) 2 else 1
+    val reps = if (ready) target.min else ((prev.reps ?: 0) + step).coerceIn(target.min, target.max)
+    return when (info.tracking) {
+        TrackingType.WEIGHT_REPS -> {
+            val w = prev.weightKg ?: return null
+            val weight = when {
+                !ready -> w
+                info.equipment == Equipment.ASSISTED_BODYWEIGHT -> (w - step * target.incrementKg).coerceAtLeast(0.0)
+                else -> w + step * target.incrementKg
+            }
+            SessionSet(key = 0, weightKg = weight, reps = reps)
+        }
+        // No weight to add, so bodyweight sets just climb to the top of the range.
+        TrackingType.REPS -> SessionSet(key = 0, reps = if (ready) target.max else reps)
+        else -> null
+    }
+}
+
+/**
+ * Blanks working sets that still hold the numbers a template started them with, for exercises
+ * where [targeted] is true, so their targets show instead of stale template values.
+ */
+fun Session.clearForTargets(original: Session, targeted: (Long) -> Boolean): Session {
+    val before = original.exercises.flatMap { it.sets }.associateBy { it.key }
+    return copy(exercises = exercises.map { ex ->
+        if (!targeted(ex.exerciseId)) return@map ex
+        ex.copy(sets = ex.sets.map { set ->
+            val o = before[set.key]
+            if (set.done || !set.type.isWorking() || o == null || o.weightKg != set.weightKg || o.reps != set.reps) set
+            else set.copy(weightKg = null, reps = null)
+        })
+    })
+}
+
+/** What a blank set suggests: its target if the exercise has one, else last time's values. */
+fun suggestionFor(ex: SessionExercise, index: Int, previous: List<SetEntity>?, info: ExerciseEntity?, unit: WeightUnit): SessionSet? =
+    targetFor(ex, index, previous, info, unit) ?: hintFor(ex, index, previous)
+
 fun SessionSet.applyHint(hint: SessionSet?): SessionSet = if (hint == null) this else copy(
     weightKg = weightKg ?: hint.weightKg,
     reps = reps ?: hint.reps,
     seconds = seconds ?: hint.seconds,
     distanceKm = distanceKm ?: hint.distanceKm,
 )
+
+// ---- Effort ----
+
+/** Effort is asked for exercises measured in reps; time and distance have no "reps left". */
+fun tracksEffort(info: ExerciseEntity?) = info?.tracking == TrackingType.WEIGHT_REPS || info?.tracking == TrackingType.REPS
+
+/**
+ * A guess at reps in reserve, to suggest before the lifter answers: the reps your best est. 1RM
+ * says you could do at this weight (inverse Epley), minus what you did. Bodyweight sets compare
+ * against your best set's reps. Null when there's nothing to go on.
+ */
+fun estimateRir(set: SessionSet, info: ExerciseEntity?, bests: Bests?): Int? {
+    val reps = set.reps?.takeIf { it > 0 } ?: return null
+    if (bests == null || info == null) return null
+    return when (info.tracking) {
+        TrackingType.WEIGHT_REPS -> {
+            if (info.equipment == Equipment.ASSISTED_BODYWEIGHT) return null
+            val w = set.weightKg?.takeIf { it > 0 } ?: return null
+            if (bests.oneRm <= 0) return null
+            val possible = if (w >= bests.oneRm) 1.0 else 30 * (bests.oneRm / w - 1)
+            Math.round(possible - reps).toInt().coerceIn(0, RIR_MAX)
+        }
+        TrackingType.REPS -> if (bests.reps <= 0) null else (bests.reps - reps).coerceIn(0, RIR_MAX)
+        else -> null
+    }
+}
+
+/** Est. 1RM counting the reps left in reserve, so an easy 8 rates above a grinding 8. */
+fun effortOneRepMax(weightKg: Double, reps: Int, rir: Int?): Double = estimatedOneRepMax(weightKg, reps + (rir ?: 0))
 
 // ---- Records ----
 

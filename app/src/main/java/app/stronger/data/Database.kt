@@ -1,6 +1,7 @@
 package app.stronger.data
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Embedded
@@ -8,6 +9,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
@@ -28,6 +30,11 @@ data class ExerciseEntity(
     val isCustom: Boolean = false,
     val isArchived: Boolean = false,
     val restSeconds: Int? = null,
+    /** Rep range for progression targets; both null when the exercise has none. */
+    val repMin: Int? = null,
+    val repMax: Int? = null,
+    /** Weight added once every working set reaches [repMax]; null uses the equipment default. */
+    val incrementKg: Double? = null,
 ) {
     val tracking: TrackingType get() = equipment.tracking
 }
@@ -68,6 +75,8 @@ data class SetEntity(
     val supersetId: Int? = null,
     val exerciseNote: String = "",
     val restSeconds: Int? = null,
+    /** Reps in reserve, when the lifter gave it. */
+    val rir: Int? = null,
 ) {
     val volumeKg: Double get() = (weightKg ?: 0.0) * (reps ?: 0)
     val oneRm: Double get() = estimatedOneRepMax(weightKg ?: 0.0, reps ?: 0)
@@ -84,6 +93,18 @@ data class TemplateEntity(
     val createdAt: Long = System.currentTimeMillis(),
     val lastUsedAt: Long? = null,
     val position: Int = 0,
+)
+
+@Serializable
+@Entity(tableName = "measurements", indices = [Index("kind", "takenAt"), Index("hcId", unique = true)])
+data class MeasurementEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val kind: MeasureKind,
+    val takenAt: Long,
+    /** In the kind's base unit: kg, % or cm. */
+    val value: Double,
+    /** Health Connect record id when this came from another app. */
+    val hcId: String? = null,
 )
 
 data class SetWithWorkout(
@@ -218,26 +239,55 @@ interface TemplateDao {
 }
 
 @Dao
+interface MeasurementDao {
+    @Query("SELECT * FROM measurements ORDER BY takenAt DESC")
+    fun observeAll(): Flow<List<MeasurementEntity>>
+
+    @Query("SELECT * FROM measurements")
+    suspend fun all(): List<MeasurementEntity>
+
+    @Query("SELECT * FROM measurements WHERE id = :id")
+    suspend fun get(id: Long): MeasurementEntity?
+
+    @Insert suspend fun insert(m: MeasurementEntity): Long
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertIgnoring(m: List<MeasurementEntity>): List<Long>
+    @Update suspend fun update(m: MeasurementEntity)
+
+    @Query("SELECT * FROM measurements WHERE hcId = :hcId")
+    suspend fun byHcId(hcId: String): MeasurementEntity?
+
+    @Query("DELETE FROM measurements WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM measurements WHERE hcId = :hcId")
+    suspend fun deleteByHcId(hcId: String)
+}
+
+@Dao
 interface MaintenanceDao {
     @Query("DELETE FROM sets") suspend fun clearSets()
     @Query("DELETE FROM workouts") suspend fun clearWorkouts()
     @Query("DELETE FROM templates") suspend fun clearTemplates()
     @Query("DELETE FROM exercises") suspend fun clearExercises()
+    @Query("DELETE FROM measurements") suspend fun clearMeasurements()
     @Insert suspend fun insertExercises(e: List<ExerciseEntity>)
     @Insert suspend fun insertWorkouts(w: List<WorkoutEntity>)
     @Insert suspend fun insertSets(s: List<SetEntity>)
     @Insert suspend fun insertTemplates(t: List<TemplateEntity>)
+    @Insert suspend fun insertMeasurements(m: List<MeasurementEntity>)
 }
 
 @Database(
-    entities = [ExerciseEntity::class, WorkoutEntity::class, SetEntity::class, TemplateEntity::class],
-    version = 1,
+    entities = [ExerciseEntity::class, WorkoutEntity::class, SetEntity::class, TemplateEntity::class, MeasurementEntity::class],
+    version = 3,
     exportSchema = true,
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun exercises(): ExerciseDao
     abstract fun workouts(): WorkoutDao
     abstract fun templates(): TemplateDao
+    abstract fun measurements(): MeasurementDao
     abstract fun maintenance(): MaintenanceDao
 
     companion object {

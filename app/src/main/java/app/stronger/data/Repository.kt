@@ -1,5 +1,6 @@
 package app.stronger.data
 
+import app.stronger.health.HealthSync
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
@@ -16,10 +17,11 @@ data class WorkoutSummary(
     val workoutNumber: Int,
 )
 
-class Repository(private val db: AppDatabase, val settings: SettingsStore) {
+class Repository(private val db: AppDatabase, val settings: SettingsStore, private val health: HealthSync) {
     private val exerciseDao = db.exercises()
     private val workoutDao = db.workouts()
     private val templateDao = db.templates()
+    private val measurementDao = db.measurements()
 
     // ---- Exercises ----
     val exercises: Flow<List<ExerciseEntity>> = exerciseDao.observeAll()
@@ -74,7 +76,10 @@ class Repository(private val db: AppDatabase, val settings: SettingsStore) {
     fun workout(id: Long) = workoutDao.observe(id)
     fun workoutSets(id: Long) = workoutDao.observeSets(id)
     fun exerciseSets(exerciseId: Long) = workoutDao.observeExerciseSets(exerciseId)
-    suspend fun deleteWorkout(id: Long) = workoutDao.delete(id)
+    suspend fun deleteWorkout(id: Long) {
+        workoutDao.delete(id)
+        health.workoutDeleted(id)
+    }
 
     /** Sets from the most recent workout (started before [before]) that included each exercise. */
     suspend fun previousSets(exerciseIds: List<Long>, before: Long = Long.MAX_VALUE): Map<Long, List<SetEntity>> {
@@ -118,7 +123,7 @@ class Repository(private val db: AppDatabase, val settings: SettingsStore) {
                 sets = group.sortedBy { it.setIndex }.map {
                     SessionSet(
                         key = Keys.next(), type = it.type, weightKg = it.weightKg, reps = it.reps,
-                        seconds = it.seconds, distanceKm = it.distanceKm, done = true, prMask = it.prMask,
+                        seconds = it.seconds, distanceKm = it.distanceKm, done = true, prMask = it.prMask, rir = it.rir,
                     )
                 },
             )
@@ -139,6 +144,7 @@ class Repository(private val db: AppDatabase, val settings: SettingsStore) {
                     workoutId = workoutId, exerciseId = ex.exerciseId, exerciseIndex = exIndex, setIndex = setIndex,
                     type = s.type, weightKg = s.weightKg, reps = s.reps, seconds = s.seconds, distanceKm = s.distanceKm,
                     prMask = s.prMask, supersetId = ex.supersetId, exerciseNote = ex.note, restSeconds = ex.restSeconds,
+                    rir = s.rir,
                 )
             }
         }
@@ -151,6 +157,7 @@ class Repository(private val db: AppDatabase, val settings: SettingsStore) {
         )
         val sets = toSetEntities(session, 0)
         val id = workoutDao.insertWithSets(workout, sets)
+        health.workoutSaved(id)
         session.templateId?.let { markTemplateUsed(it) }
         val names = sets.map { it.exerciseId }.distinct().associateWith { exerciseDao.get(it)?.name ?: "Exercise" }
         val records = sets.filter { it.prMask != 0 }.groupBy { it.exerciseId }.map { (exId, rows) ->
@@ -167,6 +174,20 @@ class Repository(private val db: AppDatabase, val settings: SettingsStore) {
         val w = workoutDao.get(id) ?: return
         val updated = w.copy(name = session.name.ifBlank { w.name }, notes = session.notes, startedAt = session.startedAt, endedAt = endedAt)
         workoutDao.replace(updated, toSetEntities(session, id))
+        health.workoutSaved(id)
+    }
+
+    // ---- Body measurements ----
+    val measurements: Flow<List<MeasurementEntity>> = measurementDao.observeAll()
+
+    suspend fun saveMeasurement(m: MeasurementEntity) {
+        val saved = if (m.id == 0L) m.copy(id = measurementDao.insert(m)) else m.also { measurementDao.update(it) }
+        health.measurementSaved(saved)
+    }
+
+    suspend fun deleteMeasurement(m: MeasurementEntity) {
+        measurementDao.delete(m.id)
+        health.measurementDeleted(m)
     }
 
     // ---- Import helpers ----

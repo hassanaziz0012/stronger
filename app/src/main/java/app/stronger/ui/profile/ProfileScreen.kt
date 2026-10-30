@@ -29,7 +29,12 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Sync
+import androidx.health.connect.client.HealthConnectClient
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Vibration
 import androidx.compose.material.icons.outlined.VolumeUp
@@ -93,6 +98,8 @@ import app.stronger.ui.workout.PlateCalculatorSheet
 import app.stronger.ui.workout.RestPickerSheet
 import app.stronger.ui.workout.weekStart
 import app.stronger.ui.workout.weekStreak
+import app.stronger.data.MeasureKind
+import app.stronger.data.MeasurementEntity
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -105,7 +112,11 @@ fun ProfileScreen(nav: Nav) {
     val sets by c.repo.allSets.collectAsStateWithLifecycle(emptyList())
     val exercises by c.repo.exerciseIndex.collectAsStateWithLifecycle(emptyMap())
     val settings by c.settings.settings.collectAsStateWithLifecycle(AppSettings())
+    val measurements by c.repo.measurements.collectAsStateWithLifecycle(emptyList())
     var plates by remember { mutableStateOf(false) }
+    var logging by remember { mutableStateOf<MeasurementEntity?>(null) }
+    val scope = rememberCoroutineScope()
+    val connect = rememberHealthConnect()
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val unit = settings.unit
 
@@ -150,6 +161,16 @@ fun ProfileScreen(nav: Nav) {
                         )
                     }
                 }
+            }
+            item {
+                BodyWeightCard(
+                    measurements, unit, onOpen = { nav.body() },
+                    onLog = { logging = MeasurementEntity(kind = MeasureKind.WEIGHT, takenAt = System.currentTimeMillis(), value = 0.0) },
+                )
+            }
+            item {
+                val local = remember(sets, workouts, exercises) { strongerCardio(sets, workouts, exercises) }
+                ActivityCard(settings.healthConnect, local, onConnect = connect)
             }
             item {
                 Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
@@ -197,6 +218,12 @@ fun ProfileScreen(nav: Nav) {
         }
     }
     if (plates) PlateCalculatorSheet(null, settings) { plates = false }
+    logging?.let { m ->
+        MeasurementSheet(
+            m, unit, onSave = { saved -> logging = null; scope.launch { c.repo.saveMeasurement(saved) } },
+            onDelete = null, onDismiss = { logging = null },
+        )
+    }
 }
 
 private fun LocalDate.formatShort() = "${monthValue}/${dayOfMonth}"
@@ -219,6 +246,9 @@ fun SettingsScreen(nav: Nav) {
     var pendingRestore by remember { mutableStateOf<Uri?>(null) }
 
     fun update(f: (AppSettings) -> AppSettings) = scope.launch { c.settings.update(f) }
+    val connectHealth = rememberHealthConnect { ok ->
+        if (!ok) message = "No access given" to "Stronger can't sync without Health Connect access. If the dialog didn't appear, allow Stronger in Health Connect's app permissions."
+    }
 
     suspend fun readText(uri: Uri) = withContext(Dispatchers.IO) {
         context.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
@@ -230,6 +260,7 @@ fun SettingsScreen(nav: Nav) {
             busy = "Importing your Strong history…"
             message = runCatching {
                 val r = StrongCsvImporter(c.repo).import(readText(uri), settings.unit)
+                c.health.syncInBackground()
                 "Import complete" to buildString {
                     append("${plural(r.workouts, "workout")} and ${plural(r.sets, "set")} imported.")
                     if (r.newExercises > 0) append(" ${plural(r.newExercises, "exercise")} new to Stronger ${if (r.newExercises == 1) "was" else "were"} added as custom.")
@@ -295,6 +326,11 @@ fun SettingsScreen(nav: Nav) {
                         }
                     },
                     {
+                        Row1(Icons.Outlined.Speed, "Ask how hard each set was", "Reps left in the tank, after each working set", it) {
+                            Switch(settings.trackEffort, { v -> update { s -> s.copy(trackEffort = v) } })
+                        }
+                    },
+                    {
                         Row1(Icons.Outlined.LightMode, "Keep screen on", "While a workout is open", it) {
                             Switch(settings.keepScreenOn, { v -> update { s -> s.copy(keepScreenOn = v) } })
                         }
@@ -337,6 +373,37 @@ fun SettingsScreen(nav: Nav) {
                         ) { Text("Plates you have (${settings.unit.label})") }
                     },
                 )
+            }
+            if (c.health.available) group("Health Connect") {
+                buildList<@Composable (Pair<Int, Int>) -> Unit> {
+                    add {
+                        Row1(
+                            Icons.Outlined.MonitorHeart, "Sync with Health Connect",
+                            if (settings.healthConnect) "Workouts and body weight go out; weight, cardio, steps and sleep come in" else "Off", it,
+                        ) {
+                            Switch(settings.healthConnect, { on -> if (on) connectHealth() else update { s -> s.copy(healthConnect = false) } })
+                        }
+                    }
+                    if (settings.healthConnect) {
+                        add {
+                            Row1(Icons.Outlined.Sync, "Sync now", "Write every workout and pull in new measurements", it, onClick = {
+                                scope.launch {
+                                    busy = "Syncing with Health Connect…"
+                                    message = runCatching {
+                                        val r = c.health.syncAll()
+                                        "Synced" to "${plural(r.workouts, "workout")} written to Health Connect. ${plural(r.imported, "new measurement")} brought in."
+                                    }.getOrElse { "Sync failed" to (it.message ?: "Health Connect didn't respond.") }
+                                    busy = null
+                                }
+                            })
+                        }
+                        add {
+                            Row1(Icons.Outlined.Shield, "Manage access", "Choose what Stronger can read and write", it, onClick = {
+                                runCatching { context.startActivity(HealthConnectClient.getHealthConnectManageDataIntent(context)) }
+                            })
+                        }
+                    }
+                }
             }
             group("Your data") {
                 listOf(
@@ -396,6 +463,7 @@ fun SettingsScreen(nav: Nav) {
                         busy = "Restoring…"
                         message = runCatching {
                             val b = BackupManager(c.repo).restore(readText(uri))
+                            c.health.syncInBackground()
                             "Restored" to "${plural(b.workouts.size, "workout")}, ${plural(b.templates.size, "template")} and ${plural(b.exercises.size, "exercise")} are back."
                         }.getOrElse { "Restore failed" to (it.message ?: "That file isn't a Stronger backup.") }
                         busy = null

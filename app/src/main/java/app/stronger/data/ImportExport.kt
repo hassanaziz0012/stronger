@@ -20,7 +20,7 @@ class StrongCsvImporter(private val repo: Repository) {
         val iDate = col("date"); val iName = col("workout name"); val iDur = col("duration")
         val iEx = col("exercise name"); val iOrder = col("set order"); val iWeight = col("weight")
         val iReps = col("reps"); val iDist = col("distance"); val iSec = col("seconds")
-        val iNotes = header.indexOf("notes"); val iWNotes = col("workout notes")
+        val iNotes = header.indexOf("notes"); val iWNotes = col("workout notes"); val iRpe = col("rpe")
         require(iDate >= 0 && iEx >= 0) { "This doesn't look like a Strong export" }
         val weightFactor = when {
             iWeight >= 0 && "lb" in header[iWeight] -> 1 / WeightUnit.LB.perKg
@@ -31,7 +31,8 @@ class StrongCsvImporter(private val repo: Repository) {
         val durationInSeconds = iDur >= 0 && "sec" in header[iDur]
 
         data class Row(val date: String, val name: String, val duration: String, val exercise: String, val order: String,
-                       val weight: Double?, val reps: Int?, val dist: Double?, val sec: Int?, val note: String, val wNote: String)
+                       val weight: Double?, val reps: Int?, val dist: Double?, val sec: Int?, val note: String, val wNote: String,
+                       val rir: Int?)
 
         val rows = lines.drop(1).mapNotNull { line ->
             val c = parseLine(line, delimiter)
@@ -42,7 +43,7 @@ class StrongCsvImporter(private val repo: Repository) {
                 at(iDate), at(iName), at(iDur), at(iEx), order,
                 at(iWeight).toDoubleOrNull()?.times(weightFactor), at(iReps).toDoubleOrNull()?.toInt(),
                 at(iDist).toDoubleOrNull()?.times(distFactor), at(iSec).toDoubleOrNull()?.toInt(),
-                at(iNotes), at(iWNotes),
+                at(iNotes), at(iWNotes), at(iRpe).toDoubleOrNull()?.let { rpeToRir(it) },
             )
         }
 
@@ -90,7 +91,7 @@ class StrongCsvImporter(private val repo: Repository) {
                         SessionSet(
                             key = Keys.next(), type = setType(it.order), weightKg = it.weight?.takeIf { w -> w != 0.0 },
                             reps = it.reps?.takeIf { r -> r != 0 }, seconds = it.sec?.takeIf { s -> s != 0 },
-                            distanceKm = it.dist?.takeIf { d -> d != 0.0 }, done = true,
+                            distanceKm = it.dist?.takeIf { d -> d != 0.0 }, done = true, rir = it.rir,
                         )
                     }
                     val marked = computePrMasks(session, tracking[exId] ?: TrackingType.WEIGHT_REPS, running[exId], running.containsKey(exId))
@@ -98,7 +99,7 @@ class StrongCsvImporter(private val repo: Repository) {
                         SetEntity(
                             workoutId = 0, exerciseId = exId, exerciseIndex = exIndex, setIndex = setIndex, type = s.type,
                             weightKg = s.weightKg, reps = s.reps, seconds = s.seconds, distanceKm = s.distanceKm,
-                            prMask = s.prMask, exerciseNote = note,
+                            prMask = s.prMask, exerciseNote = note, rir = s.rir,
                         )
                     }
                 }
@@ -132,6 +133,9 @@ class StrongCsvImporter(private val repo: Repository) {
     }
 
     companion object {
+        /** RPE 10 is no reps left, 9 is one, and so on; zero or blank means not recorded. */
+        internal fun rpeToRir(rpe: Double): Int? = if (rpe <= 0) null else Math.round(10 - rpe).toInt().coerceIn(0, RIR_MAX)
+
         internal fun parseDuration(s: String, plainSeconds: Boolean): Long {
             if (plainSeconds) return s.toDoubleOrNull()?.toLong() ?: 0
             var total = 0L
@@ -201,13 +205,14 @@ class StrongCsvImporter(private val repo: Repository) {
 
 @Serializable
 data class Backup(
-    val version: Int = 1,
+    val version: Int = 2,
     val exportedAt: Long = System.currentTimeMillis(),
     val settings: AppSettings,
     val exercises: List<ExerciseEntity>,
     val workouts: List<WorkoutEntity>,
     val sets: List<SetEntity>,
     val templates: List<TemplateEntity>,
+    val measurements: List<MeasurementEntity> = emptyList(),
 )
 
 class BackupManager(private val repo: Repository) {
@@ -220,6 +225,7 @@ class BackupManager(private val repo: Repository) {
                 workouts = db.workouts().all(),
                 sets = db.workouts().allSets(),
                 templates = db.templates().all(),
+                measurements = db.measurements().all(),
             )
         )
     }
@@ -229,13 +235,16 @@ class BackupManager(private val repo: Repository) {
         val db = repo.database
         val m = db.maintenance()
         db.withTransaction {
-            m.clearSets(); m.clearWorkouts(); m.clearTemplates(); m.clearExercises()
+            m.clearSets(); m.clearWorkouts(); m.clearTemplates(); m.clearExercises(); m.clearMeasurements()
             m.insertExercises(backup.exercises)
             m.insertWorkouts(backup.workouts)
             m.insertSets(backup.sets)
             m.insertTemplates(backup.templates)
+            m.insertMeasurements(backup.measurements)
         }
         repo.settings.update { backup.settings }
+        // Imported Health Connect ids may not exist on this phone; re-read from scratch.
+        repo.settings.setHealthToken(null)
         return backup
     }
 }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,9 +24,11 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -66,6 +69,10 @@ import app.stronger.data.ExerciseEntity
 import app.stronger.data.Session
 import app.stronger.data.TemplateEntity
 import app.stronger.data.WorkoutEntity
+import app.stronger.data.Trend
+import app.stronger.data.deloadSuggested
+import app.stronger.data.progressByExercise
+import app.stronger.ui.plural
 import app.stronger.ui.Nav
 import app.stronger.ui.components.EmptyState
 import app.stronger.ui.components.HSpace
@@ -112,6 +119,12 @@ fun WorkoutHomeScreen(nav: Nav) {
     val exercises by c.repo.exerciseIndex.collectAsStateWithLifecycle(emptyMap())
     val settings by c.settings.settings.collectAsStateWithLifecycle(AppSettings())
     val active by c.active.session.collectAsStateWithLifecycle()
+    val sets by c.repo.allSets.collectAsStateWithLifecycle(emptyList())
+    val plateaus = remember(sets, workouts, exercises) {
+        progressByExercise(sets, workouts.associate { it.id to it.startedAt }, exercises.mapValues { it.value.tracking })
+            .filterValues { it.trend != Trend.PROGRESSING }
+    }
+    val deload = deloadSuggested(plateaus.values) && System.currentTimeMillis() - settings.deloadDismissedAt > 21 * 86_400_000L
     var preview by remember { mutableStateOf<TemplateEntity?>(null) }
     var pendingStart by remember { mutableStateOf<Session?>(null) }
     var deleting by remember { mutableStateOf<TemplateEntity?>(null) }
@@ -147,6 +160,14 @@ fun WorkoutHomeScreen(nav: Nav) {
                     }
                     VSpace(16.dp)
                     WeekCard(workouts, settings.weeklyGoal)
+                    if (deload) {
+                        VSpace(12.dp)
+                        DeloadCard(
+                            plateaus.keys.mapNotNull { exercises[it] },
+                            onOpen = { nav.exercise(it.id) },
+                            onDismiss = { scope.launch { c.settings.update { s -> s.copy(deloadDismissedAt = System.currentTimeMillis()) } } },
+                        )
+                    }
                 }
             }
             item {
@@ -390,6 +411,36 @@ private fun TemplatePreviewSheet(
                     Text(" Start workout")
                 }
             }
+        }
+    }
+}
+
+/** Several lifts stuck at once usually means fatigue, not the program. */
+@Composable
+private fun DeloadCard(stuck: List<ExerciseEntity>, onOpen: (ExerciseEntity) -> Unit, onDismiss: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        ),
+    ) {
+        Column(Modifier.padding(20.dp).fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.BatteryChargingFull, null)
+                HSpace(8.dp)
+                Text("Time for a lighter week?", style = MaterialTheme.typography.titleMediumEmphasized)
+            }
+            VSpace(6.dp)
+            Text(
+                "${plural(stuck.size, "lift")} haven't beaten their best in a while. For one week, do the same workouts with about half the sets at 90% of your usual weight. You'll usually come back stronger.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            VSpace(8.dp)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                stuck.take(6).forEach { e -> AssistChip(onClick = { onOpen(e) }, label = { Text(e.name, maxLines = 1, overflow = TextOverflow.Ellipsis) }) }
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Dismiss for 3 weeks") }
         }
     }
 }

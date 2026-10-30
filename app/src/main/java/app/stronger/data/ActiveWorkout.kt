@@ -30,11 +30,18 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
     val previous: StateFlow<Map<Long, List<SetEntity>>> = _previous.asStateFlow()
 
     private val _bests = MutableStateFlow<Map<Long, Bests>>(emptyMap())
+    /** Bests from before this workout, for effort estimates. */
+    val bests: StateFlow<Map<Long, Bests>> = _bests.asStateFlow()
     private val _exercises = mutableMapOf<Long, ExerciseEntity>()
     private val _tracking get() = _exercises.mapValues { it.value.tracking }
 
+    private var unit = WeightUnit.KG
+
     init {
         _session.value?.let { refreshHistory(it) }
+        // Keep exercise details fresh so target changes apply mid-workout.
+        scope.launch { repo.exerciseIndex.collect { _exercises.putAll(it) } }
+        scope.launch { repo.settings.settings.collect { unit = it.unit } }
     }
 
     private fun load(): Session? = runCatching {
@@ -52,7 +59,7 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
     fun start(session: Session) {
         _session.value = session
         persist(session)
-        refreshHistory(session)
+        refreshHistory(session, fromTemplate = session.templateId != null)
     }
 
     override fun update(f: (Session) -> Session) {
@@ -75,17 +82,22 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
         })
     }
 
-    private fun refreshHistory(s: Session) {
+    private fun refreshHistory(s: Session, fromTemplate: Boolean = false) {
         scope.launch {
             val ids = s.exercises.map { it.exerciseId }.distinct()
             ids.forEach { id -> if (id !in _exercises) repo.getExercise(id)?.let { _exercises[id] = it } }
-            _previous.value = repo.previousSets(ids, before = s.startedAt)
+            val previous = repo.previousSets(ids, before = s.startedAt)
+            _previous.value = previous
             _bests.value = repo.bests(ids, before = s.startedAt)
-            _session.update { it?.let(::withPrs) }
+            _session.update { current ->
+                val targeted = { id: Long -> _exercises[id]?.repTarget(unit) != null && !previous[id].isNullOrEmpty() }
+                current?.let { if (fromTemplate) it.clearForTargets(s, targeted) else it }?.let(::withPrs)
+            }
+            if (fromTemplate) persist(_session.value)
         }
     }
 
-    /** Toggles a set; completing one fills blanks from hints and starts the rest timer. */
+    /** Toggles a set; completing one fills blanks from its target or last time, and starts the rest timer. */
     fun toggleSet(exKey: Long, setKey: Long) {
         val s = _session.value ?: return
         val ex = s.exercises.firstOrNull { it.key == exKey } ?: return
@@ -93,10 +105,10 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
         if (index < 0) return
         val set = ex.sets[index]
         if (set.done) {
-            update { it.updateSet(exKey, setKey) { x -> x.copy(done = false) } }
+            update { it.updateSet(exKey, setKey) { x -> x.copy(done = false, rir = null) } }
             return
         }
-        val hint = hintFor(ex, index, _previous.value[ex.exerciseId])
+        val hint = suggestionFor(ex, index, _previous.value[ex.exerciseId], _exercises[ex.exerciseId], unit)
         update { it.updateSet(exKey, setKey) { x -> x.applyHint(hint).copy(done = true) } }
         val inSuperset = ex.supersetId != null
         val lastOfGroup = !inSuperset || s.exercises.last { it.supersetId == ex.supersetId }.key == exKey

@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.stronger.container
+import app.stronger.data.rirLabel
 import app.stronger.data.AppSettings
 import app.stronger.data.ExerciseEntity
 import app.stronger.data.SetEntity
@@ -385,7 +386,7 @@ fun WorkoutDetailScreen(id: Long, nav: Nav) {
                             val label = if (set.type == SetType.WARMUP) "W" else if (set.type == SetType.NORMAL) "${++n}" else { n++; set.type.short }
                             Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(label, Modifier.size(width = 28.dp, height = 20.dp), style = MaterialTheme.typography.labelLargeEmphasized, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(formatSet(set, tracking, unit), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                                Text(formatSet(set, tracking, unit) + (set.rir?.let { " · ${rirLabel(it)}" } ?: ""), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                                 if (tracking == TrackingType.WEIGHT_REPS && set.oneRm > 0) {
                                     Text("${formatOneRm(set.oneRm, unit)} 1RM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }

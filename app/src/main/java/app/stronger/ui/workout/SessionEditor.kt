@@ -144,8 +144,6 @@ fun SessionEditorRoute(mode: EditorMode, nav: Nav) {
     val scope = rememberCoroutineScope()
 
     if (mode == EditorMode.Live) {
-        // The workout was finished or discarded from elsewhere (e.g. the notification).
-        LaunchedEffect(session == null) { if (session == null) nav.back() }
         val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         LaunchedEffect(Unit) {
             if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -180,6 +178,7 @@ fun SessionEditorRoute(mode: EditorMode, nav: Nav) {
         },
         onDiscard = {
             c.active.discard()
+            nav.back()
         },
         onOpenExercise = nav::exercise,
     )

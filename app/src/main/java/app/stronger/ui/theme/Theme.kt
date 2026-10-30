@@ -37,6 +37,11 @@ private val Plain = FontFamily(
 private fun TextStyle.brand() = copy(fontFamily = Brand)
 private fun TextStyle.plain() = copy(fontFamily = Plain)
 
+// M3 Expressive emphasized weights: Medium for display/headline/title large/body, Bold for title
+// medium/small and labels. The library defaults put everything at Medium, so set them here.
+private fun TextStyle.medium() = copy(fontWeight = FontWeight.Medium)
+private fun TextStyle.bold() = copy(fontWeight = FontWeight.Bold)
+
 private val AppTypography = Typography().let { t ->
     t.copy(
         displayLarge = t.displayLarge.brand(), displayMedium = t.displayMedium.brand(), displaySmall = t.displaySmall.brand(),
@@ -44,14 +49,14 @@ private val AppTypography = Typography().let { t ->
         titleLarge = t.titleLarge.brand(), titleMedium = t.titleMedium.plain(), titleSmall = t.titleSmall.plain(),
         bodyLarge = t.bodyLarge.plain(), bodyMedium = t.bodyMedium.plain(), bodySmall = t.bodySmall.plain(),
         labelLarge = t.labelLarge.plain(), labelMedium = t.labelMedium.plain(), labelSmall = t.labelSmall.plain(),
-        displayLargeEmphasized = t.displayLargeEmphasized.brand(), displayMediumEmphasized = t.displayMediumEmphasized.brand(),
-        displaySmallEmphasized = t.displaySmallEmphasized.brand(), headlineLargeEmphasized = t.headlineLargeEmphasized.brand(),
-        headlineMediumEmphasized = t.headlineMediumEmphasized.brand(), headlineSmallEmphasized = t.headlineSmallEmphasized.brand(),
-        titleLargeEmphasized = t.titleLargeEmphasized.brand(), titleMediumEmphasized = t.titleMediumEmphasized.plain(),
-        titleSmallEmphasized = t.titleSmallEmphasized.plain(), bodyLargeEmphasized = t.bodyLargeEmphasized.plain(),
-        bodyMediumEmphasized = t.bodyMediumEmphasized.plain(), bodySmallEmphasized = t.bodySmallEmphasized.plain(),
-        labelLargeEmphasized = t.labelLargeEmphasized.plain(), labelMediumEmphasized = t.labelMediumEmphasized.plain(),
-        labelSmallEmphasized = t.labelSmallEmphasized.plain(),
+        displayLargeEmphasized = t.displayLargeEmphasized.brand().medium(), displayMediumEmphasized = t.displayMediumEmphasized.brand().medium(),
+        displaySmallEmphasized = t.displaySmallEmphasized.brand().medium(), headlineLargeEmphasized = t.headlineLargeEmphasized.brand().medium(),
+        headlineMediumEmphasized = t.headlineMediumEmphasized.brand().medium(), headlineSmallEmphasized = t.headlineSmallEmphasized.brand().medium(),
+        titleLargeEmphasized = t.titleLargeEmphasized.brand().medium(), titleMediumEmphasized = t.titleMediumEmphasized.plain().bold(),
+        titleSmallEmphasized = t.titleSmallEmphasized.plain().bold(), bodyLargeEmphasized = t.bodyLargeEmphasized.plain().medium(),
+        bodyMediumEmphasized = t.bodyMediumEmphasized.plain().medium(), bodySmallEmphasized = t.bodySmallEmphasized.plain().medium(),
+        labelLargeEmphasized = t.labelLargeEmphasized.plain().bold(), labelMediumEmphasized = t.labelMediumEmphasized.plain().bold(),
+        labelSmallEmphasized = t.labelSmallEmphasized.plain().bold(),
     )
 }
 

@@ -131,36 +131,36 @@ class StrongCsvImporter(private val repo: Repository) {
         return null
     }
 
-    private fun parseDuration(s: String, plainSeconds: Boolean): Long {
-        if (plainSeconds) return s.toDoubleOrNull()?.toLong() ?: 0
-        var total = 0L
-        Regex("""(\d+)\s*([hms])""").findAll(s).forEach { m ->
-            val n = m.groupValues[1].toLong()
-            total += when (m.groupValues[2]) { "h" -> n * 3600; "m" -> n * 60; else -> n }
-        }
-        return total
-    }
-
-    private fun parseLine(line: String, delimiter: Char): List<String> {
-        val out = mutableListOf<String>()
-        val sb = StringBuilder()
-        var quoted = false
-        var i = 0
-        while (i < line.length) {
-            val ch = line[i]
-            when {
-                ch == '"' && quoted && i + 1 < line.length && line[i + 1] == '"' -> { sb.append('"'); i++ }
-                ch == '"' -> quoted = !quoted
-                ch == delimiter && !quoted -> { out += sb.toString(); sb.clear() }
-                else -> sb.append(ch)
-            }
-            i++
-        }
-        out += sb.toString()
-        return out
-    }
-
     companion object {
+        internal fun parseDuration(s: String, plainSeconds: Boolean): Long {
+            if (plainSeconds) return s.toDoubleOrNull()?.toLong() ?: 0
+            var total = 0L
+            Regex("""(\d+)\s*([hms])""").findAll(s).forEach { m ->
+                val n = m.groupValues[1].toLong()
+                total += when (m.groupValues[2]) { "h" -> n * 3600; "m" -> n * 60; else -> n }
+            }
+            return total
+        }
+
+        internal fun parseLine(line: String, delimiter: Char): List<String> {
+            val out = mutableListOf<String>()
+            val sb = StringBuilder()
+            var quoted = false
+            var i = 0
+            while (i < line.length) {
+                val ch = line[i]
+                when {
+                    ch == '"' && quoted && i + 1 < line.length && line[i + 1] == '"' -> { sb.append('"'); i++ }
+                    ch == '"' -> quoted = !quoted
+                    ch == delimiter && !quoted -> { out += sb.toString(); sb.clear() }
+                    else -> sb.append(ch)
+                }
+                i++
+            }
+            out += sb.toString()
+            return out
+        }
+
         fun guessEquipment(name: String, data: List<Triple<Double?, Double?, Pair<Int?, Int?>>>): Equipment {
             val paren = Regex("""\(([^)]*)\)""").findAll(name).lastOrNull()?.groupValues?.get(1)?.lowercase() ?: ""
             when {
@@ -183,13 +183,14 @@ class StrongCsvImporter(private val repo: Repository) {
 
         fun guessBodyPart(name: String): BodyPart {
             val n = name.lowercase()
+            // Order matters: the first group with a matching keyword wins.
             val table = listOf(
+                BodyPart.CORE to listOf("plank", "crunch", "ab wheel", "abs", "sit up", "hollow", "l-sit", "core", "twist", "leg raise", "knee raise", "frog"),
                 BodyPart.CHEST to listOf("bench", "chest", "fly", "push up", "pushup", "dip", "pec", "crossover"),
                 BodyPart.BACK to listOf("row", "pull up", "pullup", "chin", "pulldown", "deadlift", "back", "shrug", "hang", "lat "),
-                BodyPart.SHOULDERS to listOf("shoulder", "overhead", "press", "lateral", "raise", "handstand", "pike", "delt", "face pull"),
-                BodyPart.ARMS to listOf("curl", "tricep", "bicep", "skull", "pushdown", "wrist"),
                 BodyPart.LEGS to listOf("squat", "lunge", "leg", "calf", "hip", "glute", "step", "split"),
-                BodyPart.CORE to listOf("plank", "crunch", "ab ", "abs", "sit up", "hollow", "l-sit", "core", "twist", "frog"),
+                BodyPart.ARMS to listOf("curl", "tricep", "bicep", "skull", "pushdown", "wrist"),
+                BodyPart.SHOULDERS to listOf("shoulder", "overhead", "press", "lateral", "raise", "handstand", "pike", "delt", "face pull"),
                 BodyPart.CARDIO to listOf("run", "cycl", "bike", "rowing", "walk", "swim", "elliptical", "jump rope", "cardio"),
                 BodyPart.OLYMPIC to listOf("snatch", "clean", "jerk"),
             )

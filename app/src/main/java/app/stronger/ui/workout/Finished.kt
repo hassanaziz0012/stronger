@@ -154,7 +154,20 @@ fun FinishedScreen(workoutId: Long, nav: Nav) {
             contentPadding = ButtonDefaults.MediumContentPadding,
             shapes = ButtonDefaults.shapes(),
         ) { Text("Done", style = MaterialTheme.typography.titleMediumEmphasized) }
-        if (w.templateId == null) {
+        if (w.templateId != null) {
+            VSpace(8.dp)
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        c.repo.sessionFromWorkout(w.id)?.let { c.repo.saveTemplate(w.templateId, it.copy(name = c.repo.template(w.templateId)?.name ?: it.name)) }
+                        savedTemplate = true
+                    }
+                },
+                enabled = !savedTemplate,
+                modifier = Modifier.fillMaxWidth(),
+                shapes = ButtonDefaults.shapes(),
+            ) { Text(if (savedTemplate) "Template updated" else "Update template with today's sets") }
+        } else {
             VSpace(8.dp)
             OutlinedButton(
                 onClick = {

@@ -178,7 +178,7 @@ fun ProfileScreen(nav: Nav) {
                         },
                         trailingContent = { Text(starts[s.workoutId]?.startedAt?.relativeDay() ?: "", style = MaterialTheme.typography.labelMedium) },
                         shapes = ListItemDefaults.segmentedShapes(recentRecords.indexOf(s), recentRecords.size),
-                        colors = ListItemDefaults.segmentedColors(),
+                        colors = segmentedColors(),
                     ) { Text(e?.name ?: "Exercise", maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
             }
@@ -190,7 +190,7 @@ fun ProfileScreen(nav: Nav) {
                     supportingContent = { Text("How to load the bar for any weight") },
                     trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
                     shapes = ListItemDefaults.segmentedShapes(0, 1),
-                    colors = ListItemDefaults.segmentedColors(),
+                    colors = segmentedColors(),
                 ) { Text("Plate calculator") }
             }
         }
@@ -332,7 +332,7 @@ fun SettingsScreen(nav: Nav) {
                                 }
                             },
                             shapes = ListItemDefaults.segmentedShapes(it.first, it.second),
-                            colors = ListItemDefaults.segmentedColors(),
+                            colors = segmentedColors(),
                         ) { Text("Plates you have (${settings.unit.label})") }
                     },
                 )
@@ -445,7 +445,7 @@ private fun Row1(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val shapes = ListItemDefaults.segmentedShapes(position.first, position.second)
-    val colors = ListItemDefaults.segmentedColors()
+    val colors = segmentedColors()
     if (onClick != null) {
         ListItem(
             onClick = onClick,
@@ -463,3 +463,7 @@ private fun Row1(
         ) { Text(title) }
     }
 }
+
+/** Segmented rows sit on a tonal container so each one reads as its own surface. */
+@Composable
+private fun segmentedColors() = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)

@@ -86,10 +86,21 @@ fun Session.volumeKg() = exercises.sumOf { ex ->
 }
 
 /**
+ * The matching set from last time: warm-ups pair with warm-ups and working sets with working
+ * sets, so adding or deleting a warm-up doesn't shift the comparison.
+ */
+fun previousFor(ex: SessionExercise, index: Int, previous: List<SetEntity>?): SetEntity? {
+    previous ?: return null
+    val warm = ex.sets[index].type == SetType.WARMUP
+    val ordinal = ex.sets.take(index).count { (it.type == SetType.WARMUP) == warm }
+    return previous.filter { (it.type == SetType.WARMUP) == warm }.getOrNull(ordinal)
+}
+
+/**
  * What a blank set should default to: the same set from last time, else the set above it.
  */
 fun hintFor(ex: SessionExercise, index: Int, previous: List<SetEntity>?): SessionSet? {
-    previous?.getOrNull(index)?.let {
+    previousFor(ex, index, previous)?.let {
         return SessionSet(key = 0, weightKg = it.weightKg, reps = it.reps, seconds = it.seconds, distanceKm = it.distanceKm)
     }
     return ex.sets.take(index).lastOrNull { it.weightKg != null || it.reps != null || it.seconds != null || it.distanceKm != null }

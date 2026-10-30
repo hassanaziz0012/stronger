@@ -85,6 +85,7 @@ import app.stronger.ui.formatDate
 import app.stronger.ui.formatSeconds
 import app.stronger.ui.formatSet
 import app.stronger.ui.formatWeight
+import app.stronger.ui.formatOneRm
 import app.stronger.ui.fromKg
 import app.stronger.ui.relativeDay
 import kotlinx.coroutines.launch
@@ -231,7 +232,8 @@ private fun ExerciseSession.value(m: Metric): Double {
 }
 
 private fun Metric.format(v: Double, unit: WeightUnit, tracking: TrackingType): String = when (this) {
-    Metric.ONE_RM, Metric.WEIGHT -> "${formatWeight(v, unit)} ${unit.label}"
+    Metric.ONE_RM -> "${formatOneRm(v, unit)} ${unit.label}"
+    Metric.WEIGHT -> "${formatWeight(v, unit)} ${unit.label}"
     Metric.VOLUME -> if (tracking == TrackingType.REPS) "${v.toInt()} reps" else "${app.stronger.ui.formatCompact(unit.fromKg(v))} ${unit.label}"
     Metric.REPS -> "${v.toInt()} reps"
     Metric.TIME -> formatSeconds(v.toInt())
@@ -322,10 +324,10 @@ private fun SummaryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, setti
                 HSpace(16.dp)
                 Column {
                     Text(e.name, style = MaterialTheme.typography.headlineSmallEmphasized)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AssistChip(onClick = {}, label = { Text(e.bodyPart.label) })
-                        AssistChip(onClick = {}, label = { Text(e.equipment.label) })
-                    }
+                    Text(
+                        "${e.bodyPart.label} · ${e.equipment.label}", style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -405,7 +407,7 @@ private fun HistoryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, setti
                             Text(label, Modifier.padding(end = 12.dp).size(width = 20.dp, height = 20.dp), style = MaterialTheme.typography.labelLargeEmphasized, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(formatSet(set, e.tracking, settings.unit), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                             if (e.tracking == TrackingType.WEIGHT_REPS && set.oneRm > 0) {
-                                Text("${formatWeight(set.oneRm, settings.unit)} 1RM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("${formatOneRm(set.oneRm, settings.unit)} 1RM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             if (set.prMask != 0) {
                                 HSpace(6.dp)
@@ -431,7 +433,7 @@ private fun RecordsTab(e: ExerciseEntity, sessions: List<ExerciseSession>, setti
     val records = buildList {
         when (e.tracking) {
             TrackingType.WEIGHT_REPS -> {
-                all.maxByOrNull { it.second.oneRm }?.let { (s, set) -> add(Rec("Estimated 1RM", "${formatWeight(set.oneRm, unit)} ${unit.label}", s.startedAt)) }
+                all.maxByOrNull { it.second.oneRm }?.let { (s, set) -> add(Rec("Estimated 1RM", "${formatOneRm(set.oneRm, unit)} ${unit.label}", s.startedAt)) }
                 all.filter { (it.second.reps ?: 0) > 0 }.maxByOrNull { it.second.weightKg ?: 0.0 }?.let { (s, set) -> add(Rec("Max weight", "${formatWeight(set.weightKg, unit)} ${unit.label}", s.startedAt)) }
                 all.maxByOrNull { it.second.volumeKg }?.let { (s, set) -> add(Rec("Best set", formatSet(set, e.tracking, unit), s.startedAt)) }
                 sessions.maxByOrNull { it.value(Metric.VOLUME) }?.let { s -> add(Rec("Best workout volume", Metric.VOLUME.format(s.value(Metric.VOLUME), unit, e.tracking), s.startedAt)) }

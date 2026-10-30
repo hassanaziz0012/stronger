@@ -86,6 +86,7 @@ import app.stronger.data.SetType
 import app.stronger.data.TrackingType
 import app.stronger.data.addSet
 import app.stronger.data.hintFor
+import app.stronger.data.previousFor
 import app.stronger.data.moveExercise
 import app.stronger.data.removeExercise
 import app.stronger.data.removeFromSuperset
@@ -248,7 +249,7 @@ fun ExerciseBlock(
                     key(set.key) {
                         SetRow(
                             set = set, label = label, tracking = tracking, settings = settings, mode = mode,
-                            previous = previous?.getOrNull(i),
+                            previous = previousFor(ex, i, previous),
                             hint = hintFor(ex, i, previous),
                             onChange = { f -> store.update { it.updateSet(ex.key, set.key, f) } },
                             onToggle = { onToggleSet(ex.key, set.key) },
@@ -422,24 +423,24 @@ private fun SetRow(
             }
             when (tracking) {
                 TrackingType.WEIGHT_REPS -> {
-                    NumberCell(formatWeight(set.weightKg, unit), formatWeight(hint?.weightKg, unit), true, set.done, Modifier.weight(1f)) { t ->
+                    NumberCell(formatWeight(set.weightKg, unit), formatWeight(hint?.weightKg, unit), true, set.done && live, Modifier.weight(1f)) { t ->
                         onChange { it.copy(weightKg = t.toDoubleOrNull()?.let(unit::toKg)) }
                     }
-                    NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done, Modifier.weight(1f)) { t ->
+                    NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, Modifier.weight(1f)) { t ->
                         onChange { it.copy(reps = t.toIntOrNull()) }
                     }
                 }
-                TrackingType.REPS -> NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done, Modifier.weight(1f)) { t ->
+                TrackingType.REPS -> NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, Modifier.weight(1f)) { t ->
                     onChange { it.copy(reps = t.toIntOrNull()) }
                 }
-                TrackingType.DURATION -> NumberCell(set.seconds?.toString() ?: "", hint?.seconds?.toString() ?: "", false, set.done, Modifier.weight(1f)) { t ->
+                TrackingType.DURATION -> NumberCell(set.seconds?.toString() ?: "", hint?.seconds?.toString() ?: "", false, set.done && live, Modifier.weight(1f)) { t ->
                     onChange { it.copy(seconds = t.toIntOrNull()) }
                 }
                 TrackingType.DISTANCE_DURATION -> {
-                    NumberCell(set.distanceKm?.clean() ?: "", hint?.distanceKm?.clean() ?: "", true, set.done, Modifier.weight(1f)) { t ->
+                    NumberCell(set.distanceKm?.clean() ?: "", hint?.distanceKm?.clean() ?: "", true, set.done && live, Modifier.weight(1f)) { t ->
                         onChange { it.copy(distanceKm = t.toDoubleOrNull()) }
                     }
-                    NumberCell(set.seconds?.let { (it / 60.0).clean() } ?: "", hint?.seconds?.let { (it / 60.0).clean() } ?: "", true, set.done, Modifier.weight(1f)) { t ->
+                    NumberCell(set.seconds?.let { (it / 60.0).clean() } ?: "", hint?.seconds?.let { (it / 60.0).clean() } ?: "", true, set.done && live, Modifier.weight(1f)) { t ->
                         onChange { it.copy(seconds = t.toDoubleOrNull()?.let { m -> (m * 60).roundToInt() }) }
                     }
                 }
@@ -459,6 +460,8 @@ private fun SetRow(
                     colors = IconButtonDefaults.filledIconToggleButtonColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        checkedContainerColor = MaterialTheme.colorScheme.primary,
+                        checkedContentColor = MaterialTheme.colorScheme.onPrimary,
                     ),
                     modifier = Modifier.size(44.dp, 36.dp),
                 ) { Icon(Icons.Filled.Check, if (set.done) "Mark set not done" else "Complete set") }

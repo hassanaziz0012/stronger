@@ -90,4 +90,16 @@ class LogicTest {
         assertEquals(BodyPart.SHOULDERS, StrongCsvImporter.guessBodyPart("Pike Hold"))
         assertEquals(BodyPart.BACK, StrongCsvImporter.guessBodyPart("Dead Arm Hang"))
     }
+
+    @Test fun previousPairsWarmupsSeparately() {
+        val prev = listOf(
+            SetEntity(workoutId = 1, exerciseId = 1, exerciseIndex = 0, setIndex = 0, type = SetType.WARMUP, weightKg = 30.0, reps = 8),
+            SetEntity(workoutId = 1, exerciseId = 1, exerciseIndex = 0, setIndex = 1, weightKg = 80.0, reps = 8),
+        )
+        val noWarmup = SessionExercise(key = 1, exerciseId = 1, sets = listOf(set(null, null, done = false)))
+        assertEquals(80.0, previousFor(noWarmup, 0, prev)!!.weightKg!!, 0.0)
+        val withWarmup = SessionExercise(key = 1, exerciseId = 1, sets = listOf(set(null, null, false, SetType.WARMUP), set(null, null, done = false)))
+        assertEquals(30.0, previousFor(withWarmup, 0, prev)!!.weightKg!!, 0.0)
+        assertEquals(80.0, previousFor(withWarmup, 1, prev)!!.weightKg!!, 0.0)
+    }
 }

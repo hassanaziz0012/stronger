@@ -24,7 +24,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.stronger.data.BodyPart
@@ -63,7 +65,11 @@ fun ExerciseAvatar(name: String, part: BodyPart, modifier: Modifier = Modifier, 
     ) {
         Text(
             name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "?",
-            style = if (size >= 48.dp) MaterialTheme.typography.titleMediumEmphasized else MaterialTheme.typography.labelLargeEmphasized,
+            style = when {
+                size >= 64.dp -> MaterialTheme.typography.headlineSmallEmphasized
+                size >= 48.dp -> MaterialTheme.typography.titleMediumEmphasized
+                else -> MaterialTheme.typography.labelLargeEmphasized
+            },
             color = fg,
         )
     }
@@ -116,8 +122,20 @@ fun EmptyState(
 /** Big number over a small label, used in stat rows. */
 @Composable
 fun Stat(value: String, label: String, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onSurface) {
+    // A trailing unit ("84.4k kg") is set smaller so the number keeps the room.
+    val last = value.substringAfterLast(' ')
+    val hasUnit = ' ' in value && last.all { it.isLetter() }
+    val number = if (hasUnit) value.substringBeforeLast(' ') else value
+    val unit = if (hasUnit) " $last" else ""
+    val unitStyle = MaterialTheme.typography.labelLarge.toSpanStyle()
     Column(modifier, horizontalAlignment = Alignment.Start) {
-        Text(value, style = MaterialTheme.typography.headlineSmallEmphasized, color = color, maxLines = 1)
+        Text(
+            buildAnnotatedString {
+                append(number)
+                withStyle(unitStyle) { append(unit) }
+            },
+            style = MaterialTheme.typography.headlineSmallEmphasized, color = color, maxLines = 1, softWrap = false,
+        )
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }

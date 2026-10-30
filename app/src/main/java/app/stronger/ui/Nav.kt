@@ -121,7 +121,7 @@ fun StrongerNav(openWorkoutRequests: StateFlow<Int>) {
         bottomBar = {
             AnimatedVisibility(onTab, enter = expandVertically(), exit = shrinkVertically()) {
                 Column {
-                    AnimatedVisibility(session != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                    AnimatedVisibility(session != null && dest?.hasRoute(WorkoutTab::class) != true, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                         session?.let { WorkoutMiniBar(it, nav::liveWorkout) }
                     }
                     ShortNavigationBar {

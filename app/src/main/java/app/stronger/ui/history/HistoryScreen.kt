@@ -77,6 +77,7 @@ import app.stronger.ui.formatDate
 import app.stronger.ui.formatDurationShort
 import app.stronger.ui.formatSet
 import app.stronger.ui.formatWeight
+import app.stronger.ui.formatOneRm
 import app.stronger.ui.fromKg
 import app.stronger.ui.toLocalDate
 import app.stronger.ui.workout.firstDayOfWeek
@@ -180,7 +181,7 @@ private fun MonthCalendar(month: YearMonth, onMonth: (YearMonth) -> Unit, workou
                         style = MaterialTheme.typography.titleMediumEmphasized,
                     )
                     Text(
-                        "$inMonth workout days", style = MaterialTheme.typography.labelMedium,
+                        if (inMonth == 1) "1 workout day" else "$inMonth workout days", style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -386,7 +387,7 @@ fun WorkoutDetailScreen(id: Long, nav: Nav) {
                                 Text(label, Modifier.size(width = 28.dp, height = 20.dp), style = MaterialTheme.typography.labelLargeEmphasized, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(formatSet(set, tracking, unit), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                                 if (tracking == TrackingType.WEIGHT_REPS && set.oneRm > 0) {
-                                    Text("${formatWeight(set.oneRm, unit)} 1RM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("${formatOneRm(set.oneRm, unit)} 1RM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 if (set.prMask != 0) {
                                     HSpace(6.dp)

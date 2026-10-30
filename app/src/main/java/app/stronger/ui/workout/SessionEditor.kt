@@ -104,7 +104,7 @@ class LocalEditor(private val repo: Repository, private val mode: EditorMode) : 
             _session.value = when (mode) {
                 is EditorMode.Template -> repo.template(mode.id)?.let { t ->
                     repo.sessionFromTemplate(t).copy(templateId = t.id)
-                } ?: Session(name = "New template")
+                } ?: Session(name = "")
                 is EditorMode.History -> {
                     endedAt = repo.database.workouts().get(mode.id)?.endedAt ?: 0L
                     repo.sessionFromWorkout(mode.id)
@@ -382,7 +382,7 @@ private fun SessionHeader(mode: EditorMode, session: Session, store: SessionStor
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             decorationBox = { inner ->
-                if (session.name.isEmpty()) Text("Workout name", style = MaterialTheme.typography.headlineMediumEmphasized, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (session.name.isEmpty()) Text(if (mode is EditorMode.Template) "Template name" else "Workout name", style = MaterialTheme.typography.headlineMediumEmphasized, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 inner()
             },
         )

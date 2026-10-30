@@ -24,6 +24,9 @@ fun WeightUnit.toKg(value: Double): Double = value / perKg
 fun formatWeight(kg: Double?, unit: WeightUnit): String =
     kg?.let { (Math.round(unit.fromKg(it) * 100) / 100.0).clean() } ?: ""
 
+/** Estimated maxes are fuzzy anyway; one decimal is plenty. */
+fun formatOneRm(kg: Double, unit: WeightUnit): String = (Math.round(unit.fromKg(kg) * 10) / 10.0).clean()
+
 fun formatWeightWithUnit(kg: Double, unit: WeightUnit) = "${formatWeight(kg, unit)} ${unit.label}"
 
 /** Big numbers in compact form: 12 400 kg -> "12.4k". */

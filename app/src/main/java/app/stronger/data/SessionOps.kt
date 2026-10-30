@@ -71,12 +71,12 @@ fun Session.removeSet(exKey: Long, setKey: Long) =
 
 /** A template keeps targets but never completion state. */
 fun Session.asTemplateExercises() = exercises.map { ex ->
-    ex.copy(sets = ex.sets.map { it.copy(done = false, prMask = 0, rir = null) })
+    ex.copy(sets = ex.sets.map { it.copy(done = false, prMask = 0, rir = null, doneAt = null) })
 }
 
 /** Starts a workout from template exercises with fresh keys. */
 fun List<SessionExercise>.freshCopy() = map { ex ->
-    ex.copy(key = Keys.next(), sets = ex.sets.map { it.copy(key = Keys.next(), done = false, prMask = 0, rir = null) })
+    ex.copy(key = Keys.next(), sets = ex.sets.map { it.copy(key = Keys.next(), done = false, prMask = 0, rir = null, doneAt = null) })
 }
 
 val Session.doneSetCount get() = exercises.sumOf { ex -> ex.sets.count { it.done } }
@@ -275,4 +275,136 @@ fun computePrMasks(sets: List<SessionSet>, tracking: TrackingType, previous: Bes
         }
     }
     return sets.map { it.copy(prMask = masks[it.key] ?: 0) }
+}
+
+/**
+ * Recalculates the record trophies across one exercise's whole history, oldest first, so fixing
+ * or deleting an old workout moves the trophies on later ones too. Returns only the sets whose
+ * trophies changed.
+ */
+fun recomputePrMasks(rows: List<SetWithWorkout>, tracking: TrackingType): List<SetEntity> {
+    val history = mutableListOf<SetEntity>()
+    val changed = mutableListOf<SetEntity>()
+    rows.groupBy { it.set.workoutId }.values
+        .sortedWith(compareBy({ it.first().startedAt }, { it.first().set.workoutId }))
+        .forEach { workout ->
+            val bests = if (history.isEmpty()) null else bestsOf(history)
+            workout.map { it.set }.groupBy { it.exerciseIndex }.toSortedMap().values.forEach { group ->
+                val sets = group.sortedBy { it.setIndex }
+                val session = sets.map {
+                    SessionSet(key = it.id, type = it.type, weightKg = it.weightKg, reps = it.reps, seconds = it.seconds, distanceKm = it.distanceKm, done = true)
+                }
+                computePrMasks(session, tracking, bests, bests != null).zip(sets).forEach { (marked, s) ->
+                    if (marked.prMask != s.prMask) changed += s.copy(prMask = marked.prMask)
+                }
+            }
+            history += workout.map { it.set }
+        }
+    return changed
+}
+
+/** [this] raised by the done working sets of the workout in progress. */
+private fun Bests.with(sets: List<SessionSet>): Bests {
+    val working = sets.filter { it.done && counts(it.type) }
+    return Bests(
+        weight = maxOf(weight, working.filter { (it.reps ?: 0) > 0 }.maxOfOrNull { it.weightKg ?: 0.0 } ?: 0.0),
+        oneRm = maxOf(oneRm, working.maxOfOrNull { estimatedOneRepMax(it.weightKg ?: 0.0, it.reps ?: 0) } ?: 0.0),
+        volume = maxOf(volume, working.maxOfOrNull { (it.weightKg ?: 0.0) * (it.reps ?: 0) } ?: 0.0),
+        reps = maxOf(reps, working.maxOfOrNull { it.reps ?: 0 } ?: 0),
+        seconds = seconds, distance = distance,
+    )
+}
+
+enum class RecordChance { NOW, ONE_MORE_REP }
+
+/**
+ * Whether an unticked set would set a record at the numbers it shows (what's typed, else its
+ * target or last time's), or with one more rep. Measured against [bests] from before the workout
+ * plus the sets already ticked today. Null when it wouldn't, or there's no history to beat.
+ */
+fun recordChance(ex: SessionExercise, index: Int, hint: SessionSet?, tracking: TrackingType, bests: Bests?): RecordChance? {
+    val set = ex.sets[index]
+    if (set.done || !counts(set.type) || bests == null) return null
+    val b = bests.with(ex.sets)
+    val reps = set.reps ?: hint?.reps ?: return null
+    if (reps <= 0) return null
+    val w = set.weightKg ?: hint?.weightKg ?: 0.0
+    fun beats(r: Int) = when (tracking) {
+        TrackingType.WEIGHT_REPS -> w > 0 && (w > b.weight + 1e-9 || estimatedOneRepMax(w, r) > b.oneRm + 1e-9 || w * r > b.volume + 1e-9)
+        TrackingType.REPS -> r > b.reps
+        else -> false
+    }
+    return when {
+        beats(reps) -> RecordChance.NOW
+        beats(reps + 1) -> RecordChance.ONE_MORE_REP
+        else -> null
+    }
+}
+
+// ---- Typos ----
+
+enum class SuspectField { WEIGHT, REPS, TIME, DISTANCE }
+
+/** A ticked set whose [field] is far beyond your [best], likely a slip of the keyboard. */
+data class Suspect(val exercise: SessionExercise, val set: SessionSet, val field: SuspectField, val best: Double)
+
+/** With no history to compare against, only the absurd is flagged. */
+private const val ABSURD_KG = 500.0
+private const val ABSURD_REPS = 150
+
+/**
+ * Ticked sets that look like typos: an extra digit or a lost decimal point (225 kg for 22.5, 100
+ * reps for 10). A real jump is rarely 75% over your best weight or 2.5× your best reps in one
+ * session, so these get checked before a bad number becomes a record nothing can beat.
+ */
+fun suspiciousSets(session: Session, bests: Map<Long, Bests>, info: (Long) -> ExerciseEntity?): List<Suspect> =
+    session.exercises.flatMap { ex ->
+        val e = info(ex.exerciseId) ?: return@flatMap emptyList()
+        val b = bests[ex.exerciseId]
+        ex.sets.filter { it.done }.mapNotNull { s ->
+            val weight = s.weightKg ?: 0.0
+            val reps = s.reps ?: 0
+            val seconds = s.seconds ?: 0
+            val distance = s.distanceKm ?: 0.0
+            fun far(value: Double, best: Double, ratio: Double, margin: Double) = best > 0 && value >= best * ratio && value - best >= margin
+            when {
+                e.tracking == TrackingType.WEIGHT_REPS && e.equipment != Equipment.ASSISTED_BODYWEIGHT &&
+                    (if (b == null) weight > ABSURD_KG else far(weight, b.weight, 1.75, 10.0)) ->
+                    Suspect(ex, s, SuspectField.WEIGHT, b?.weight ?: 0.0)
+                (e.tracking == TrackingType.WEIGHT_REPS || e.tracking == TrackingType.REPS) &&
+                    (if (b == null) reps > ABSURD_REPS else far(reps.toDouble(), b.reps.toDouble(), 2.5, 10.0)) ->
+                    Suspect(ex, s, SuspectField.REPS, b?.reps?.toDouble() ?: 0.0)
+                e.tracking == TrackingType.DURATION || e.tracking == TrackingType.DISTANCE_DURATION ->
+                    when {
+                        b != null && far(seconds.toDouble(), b.seconds.toDouble(), 3.0, 600.0) -> Suspect(ex, s, SuspectField.TIME, b.seconds.toDouble())
+                        b != null && far(distance, b.distance, 3.0, 5.0) -> Suspect(ex, s, SuspectField.DISTANCE, b.distance)
+                        else -> null
+                    }
+                else -> null
+            }
+        }
+    }
+
+// ---- Timing ----
+
+/** Gap after the last set beyond which the workout counts as forgotten rather than still going. */
+const val FORGOTTEN_AFTER_MS = 30 * 60_000L
+
+/** When the last set was ticked, or the start if none has been. */
+fun Session.lastActivityAt(): Long =
+    exercises.flatMap { it.sets }.mapNotNull { it.doneAt }.maxOrNull()?.coerceAtLeast(startedAt) ?: startedAt
+
+/**
+ * When the workout really ended. Finishing long after the last set (the app was left open) ends it
+ * one rest after that set instead, so duration and Health Connect aren't padded with the drive
+ * home. A finish within [FORGOTTEN_AFTER_MS] keeps the current time, so a cooldown still counts.
+ */
+fun Session.realEnd(now: Long, restSeconds: (SessionExercise) -> Int): Long {
+    var last: Pair<Long, SessionExercise>? = null
+    exercises.forEach { ex ->
+        ex.sets.forEach { s -> if (s.done && s.doneAt != null && s.doneAt > (last?.first ?: 0)) last = s.doneAt to ex }
+    }
+    val (at, ex) = last ?: return now
+    if (now - at <= FORGOTTEN_AFTER_MS) return now
+    return (at + restSeconds(ex).coerceIn(0, 300) * 1000L).coerceIn(startedAt, now)
 }

@@ -113,6 +113,8 @@ data class SetWithWorkout(
     val workoutName: String,
 )
 
+data class SetCount(val workoutId: Long, val sets: Int)
+
 data class ExerciseUsage(val exerciseId: Long, val workouts: Int, val lastAt: Long)
 
 @Dao
@@ -189,8 +191,12 @@ interface WorkoutDao {
     )
     suspend fun exerciseSets(exerciseIds: List<Long>): List<SetWithWorkout>
 
+    @Query("SELECT workoutId, COUNT(*) AS sets FROM sets GROUP BY workoutId")
+    suspend fun setCounts(): List<SetCount>
+
     @Insert suspend fun insert(w: WorkoutEntity): Long
     @Insert suspend fun insertSets(s: List<SetEntity>)
+    @Update suspend fun updateSets(s: List<SetEntity>)
     @Update suspend fun update(w: WorkoutEntity)
 
     @Query("DELETE FROM workouts WHERE id = :id")

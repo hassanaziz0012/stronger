@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.BatteryChargingFull
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material3.AlertDialog
@@ -70,8 +72,19 @@ import app.stronger.data.Session
 import app.stronger.data.TemplateEntity
 import app.stronger.data.WorkoutEntity
 import app.stronger.data.Trend
+import app.stronger.data.MeasureKind
+import app.stronger.data.MonthRecap
 import app.stronger.data.deloadSuggested
+import app.stronger.data.monthRecap
+import app.stronger.data.nextTemplate
 import app.stronger.data.progressByExercise
+import app.stronger.data.typicalDuration
+import app.stronger.data.WeightUnit
+import app.stronger.ui.clean
+import app.stronger.ui.formatCompact
+import app.stronger.ui.formatDurationShort
+import app.stronger.ui.formatOneRm
+import app.stronger.ui.fromKg
 import app.stronger.ui.plural
 import app.stronger.ui.Nav
 import app.stronger.ui.components.EmptyState
@@ -85,6 +98,8 @@ import app.stronger.ui.toLocalDate
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.YearMonth
+import java.time.ZoneId
 import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.time.temporal.WeekFields
@@ -125,6 +140,18 @@ fun WorkoutHomeScreen(nav: Nav) {
             .filterValues { it.trend != Trend.PROGRESSING }
     }
     val deload = deloadSuggested(plateaus.values) && System.currentTimeMillis() - settings.deloadDismissedAt > 21 * 86_400_000L
+    val upNext = remember(templates, workouts) { nextTemplate(templates, workouts) }
+    val ordered = remember(templates, upNext) { templates.sortedByDescending { it.id == upNext } }
+    val measurements by c.repo.measurements.collectAsStateWithLifecycle(emptyList())
+    // Last month's recap shows for the first week of the new one.
+    val recapMonth = YearMonth.now().minusMonths(1)
+    val recap = remember(workouts, sets, exercises, measurements) {
+        if (LocalDate.now().dayOfMonth > 7) null
+        else monthRecap(
+            recapMonth, workouts, sets, exercises.mapValues { it.value.tracking },
+            measurements.filter { it.kind == MeasureKind.WEIGHT }.map { it.takenAt to it.value }, ZoneId.systemDefault(),
+        )
+    }?.takeIf { settings.recapDismissed != recapMonth.toString() }
     var preview by remember { mutableStateOf<TemplateEntity?>(null) }
     var pendingStart by remember { mutableStateOf<Session?>(null) }
     var deleting by remember { mutableStateOf<TemplateEntity?>(null) }
@@ -160,6 +187,13 @@ fun WorkoutHomeScreen(nav: Nav) {
                     }
                     VSpace(16.dp)
                     WeekCard(workouts, settings.weeklyGoal)
+                    if (recap != null) {
+                        VSpace(12.dp)
+                        RecapCard(
+                            recap, settings.unit, exercises,
+                            onDismiss = { scope.launch { c.settings.update { s -> s.copy(recapDismissed = recap.month.toString()) } } },
+                        )
+                    }
                     if (deload) {
                         VSpace(12.dp)
                         DeloadCard(
@@ -183,9 +217,11 @@ fun WorkoutHomeScreen(nav: Nav) {
                     ) { OutlinedButton(onClick = { nav.template() }) { Text("Create a template") } }
                 }
             }
-            items(templates, key = { it.id }) { t ->
+            items(ordered, key = { it.id }) { t ->
                 TemplateCard(
                     t, c.repo.templateExercises(t).map { it.sets.size to (exercises[it.exerciseId]?.name ?: "Exercise") },
+                    upNext = t.id == upNext,
+                    duration = remember(workouts, t.id, t.name) { typicalDuration(workouts, t.id, t.name) },
                     onClick = { preview = t },
                     onEdit = { nav.template(t.id) },
                     onDuplicate = { scope.launch { c.repo.duplicateTemplate(t.id) } },
@@ -326,6 +362,8 @@ private fun WeekCard(workouts: List<WorkoutEntity>, goal: Int) {
 private fun TemplateCard(
     t: TemplateEntity,
     lines: List<Pair<Int, String>>,
+    upNext: Boolean,
+    duration: Long?,
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
@@ -340,6 +378,9 @@ private fun TemplateCard(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
     ) {
         Column(Modifier.padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 16.dp)) {
+            if (upNext) {
+                Text("Up next", style = MaterialTheme.typography.labelLargeEmphasized, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(t.name, style = MaterialTheme.typography.titleMediumEmphasized, modifier = Modifier.weight(1f))
                 Box {
@@ -370,7 +411,7 @@ private fun TemplateCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Schedule, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
                 Text(
-                    " " + (t.lastUsedAt?.relativeDay() ?: "Never done"),
+                    " " + (t.lastUsedAt?.relativeDay() ?: "Never done") + (duration?.let { " · about ${formatDurationShort(it)}" } ?: ""),
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
                 )
             }
@@ -442,5 +483,66 @@ private fun DeloadCard(stuck: List<ExerciseEntity>, onOpen: (ExerciseEntity) -> 
             }
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Dismiss for 3 weeks") }
         }
+    }
+}
+
+/** Last month at a glance, shown for the first week of the new one. */
+@Composable
+private fun RecapCard(recap: MonthRecap, unit: WeightUnit, exercises: Map<Long, ExerciseEntity>, onDismiss: () -> Unit) {
+    val monthName = recap.month.month.getDisplayName(TextStyle.FULL, Locale.getDefault())
+    Card(
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ),
+    ) {
+        Column(Modifier.padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 20.dp).fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.CalendarMonth, null)
+                HSpace(8.dp)
+                Text("$monthName in review", style = MaterialTheme.typography.titleMediumEmphasized, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "Dismiss") }
+            }
+            VSpace(4.dp)
+            Row(Modifier.padding(end = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val diff = recap.workouts - recap.previousWorkouts
+                val m = Modifier.weight(1f)
+                RecapStat(recap.workouts.toString(), if (recap.workouts == 1) "workout" else "workouts", if (recap.previousWorkouts > 0 && diff != 0) (if (diff > 0) "+$diff" else "$diff") else null, m)
+                // Whole hours once there are many, so the stat fits its column.
+                val hours = recap.durationMillis / 3_600_000
+                RecapStat(if (hours >= 10) "${hours}h" else formatDurationShort(recap.durationMillis), "training", null, m)
+                RecapStat(formatCompact(unit.fromKg(recap.volumeKg)), "${unit.label} lifted", null, m)
+                RecapStat(recap.records.toString(), if (recap.records == 1) "record" else "records", null, m)
+            }
+            if (recap.gains.isNotEmpty() || recap.bodyWeightChange != null) VSpace(12.dp)
+            recap.gains.take(3).forEach { (id, gain) ->
+                Text(
+                    "${exercises[id]?.name ?: "Exercise"}: +${formatOneRm(gain, unit)} ${unit.label} est. 1RM",
+                    style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            recap.bodyWeightChange?.let { unit.fromKg(it) }?.takeIf { kotlin.math.abs(it) >= 0.05 }?.let { change ->
+                Text(
+                    "Body weight: " + (if (change > 0) "+" else "−") + kotlin.math.abs(change).clean(1) + " ${unit.label}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecapStat(value: String, label: String, change: String?, modifier: Modifier) {
+    Column(modifier) {
+        // Lowercase values ("1h 2m") measure taller than digits in this font; a shared minimum keeps the labels in line.
+        Row(Modifier.heightIn(min = 32.dp)) {
+            Text(value, style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 1, softWrap = false, modifier = Modifier.alignByBaseline())
+            change?.let { Text(" $it", style = MaterialTheme.typography.labelMedium, maxLines = 1, modifier = Modifier.alignByBaseline()) }
+        }
+        Text(
+            label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
     }
 }

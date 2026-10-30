@@ -21,7 +21,11 @@ import android.os.VibratorManager
 import app.stronger.MainActivity
 import app.stronger.R
 import app.stronger.container
+import app.stronger.data.FORGOTTEN_AFTER_MS
 import app.stronger.data.Session
+import app.stronger.data.estimatedEnd
+import app.stronger.data.lastActivityAt
+import app.stronger.ui.formatDate
 import app.stronger.ui.plural
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -41,6 +45,8 @@ class WorkoutService : Service() {
     private var watchJob: Job? = null
     private val nm by lazy { getSystemService(NotificationManager::class.java) }
     private val active by lazy { container.active }
+    /** The last-activity time already asked about, so "Still training?" goes out once per lull. */
+    private var askedAbout = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -74,7 +80,7 @@ class WorkoutService : Service() {
                 return@collectLatest
             }
             nm.notify(ONGOING_ID, build(session))
-            val endsAt = session.restEndsAt ?: return@collectLatest
+            val endsAt = session.restEndsAt ?: return@collectLatest askIfStillTraining(session)
             // Tick the progress bar while resting, then alert once rest is over.
             while (currentCoroutineContext().isActive && System.currentTimeMillis() < endsAt) {
                 delay(1000)
@@ -86,6 +92,34 @@ class WorkoutService : Service() {
                 active.skipRest()
             }
         }
+    }
+
+    /**
+     * After [FORGOTTEN_AFTER_MS] without a ticked set, asks once whether the workout is still going.
+     * Finishing later still ends it at the last set, so this is only a reminder.
+     */
+    private suspend fun askIfStillTraining(session: Session) {
+        val last = session.lastActivityAt()
+        if (last != askedAbout) nm.cancel(IDLE_ID)
+        val at = last + FORGOTTEN_AFTER_MS * 2
+        delay((at - System.currentTimeMillis()).coerceAtLeast(0))
+        if (last == askedAbout) return
+        askedAbout = last
+        val done = session.exercises.sumOf { e -> e.sets.count { it.done } }
+        nm.notify(
+            IDLE_ID,
+            Notification.Builder(this, REMINDER_CHANNEL)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("Still training?")
+                .setContentText(
+                    if (done == 0) "${session.name} has been open for an hour with nothing logged."
+                    else "Your last set was ${(System.currentTimeMillis() - last) / 60_000} minutes ago. Finish to save it; it'll end at your last set."
+                )
+                .setStyle(Notification.BigTextStyle())
+                .setContentIntent(openApp())
+                .setAutoCancel(true)
+                .build(),
+        )
     }
 
     private suspend fun restOver() {
@@ -157,6 +191,7 @@ class WorkoutService : Service() {
             .setCategory(Notification.CATEGORY_WORKOUT)
             .setUsesChronometer(true)
             .setShowWhen(true)
+        session.estimatedEnd(active.pace.value, now)?.let { b.setSubText("Done ~" + it.formatDate("h:mm a")) }
 
         if (restEnds != null) {
             val total = session.restTotalSeconds.coerceAtLeast(1)
@@ -210,6 +245,7 @@ class WorkoutService : Service() {
                 setShowBadge(false)
             }
         )
+        nm.createNotificationChannel(NotificationChannel(REMINDER_CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(
             NotificationChannel(ALERT_CHANNEL, "Rest timer", NotificationManager.IMPORTANCE_HIGH).apply {
                 setSound(null, null) // Sound and vibration are played directly so settings can toggle them.
@@ -226,8 +262,10 @@ class WorkoutService : Service() {
     companion object {
         private const val ONGOING_CHANNEL = "workout"
         private const val ALERT_CHANNEL = "rest_timer"
+        const val REMINDER_CHANNEL = "reminders"
         private const val ONGOING_ID = 1
         private const val ALERT_ID = 2
+        private const val IDLE_ID = 3
         private const val ACTION_ADD = "add"
         private const val ACTION_SUB = "sub"
         private const val ACTION_SKIP = "skip"
@@ -239,7 +277,7 @@ class WorkoutService : Service() {
 
         fun stop(context: Context) {
             context.stopService(Intent(context, WorkoutService::class.java))
-            context.getSystemService(NotificationManager::class.java).cancel(ALERT_ID)
+            context.getSystemService(NotificationManager::class.java).run { cancel(ALERT_ID); cancel(IDLE_ID) }
         }
     }
 }

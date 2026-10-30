@@ -32,6 +32,9 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
     private val _bests = MutableStateFlow<Map<Long, Bests>>(emptyMap())
     /** Bests from before this workout, for effort estimates. */
     val bests: StateFlow<Map<Long, Bests>> = _bests.asStateFlow()
+    private val _pace = MutableStateFlow<Long?>(null)
+    /** Your usual milliseconds per set for this kind of workout, for estimating when it ends. */
+    val pace: StateFlow<Long?> = _pace.asStateFlow()
     private val _exercises = mutableMapOf<Long, ExerciseEntity>()
     private val _tracking get() = _exercises.mapValues { it.value.tracking }
 
@@ -89,6 +92,9 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
             val previous = repo.previousSets(ids, before = s.startedAt)
             _previous.value = previous
             _bests.value = repo.bests(ids, before = s.startedAt)
+            val (workouts, setCounts) = repo.workoutsWithSetCounts()
+            val templateName = s.templateId?.let { repo.template(it)?.name } ?: s.name
+            _pace.value = millisPerSet(workouts.filter { it.startedAt < s.startedAt }, setCounts, s.templateId, templateName)
             _session.update { current ->
                 val targeted = { id: Long -> _exercises[id]?.repTarget(unit) != null && !previous[id].isNullOrEmpty() }
                 current?.let { if (fromTemplate) it.clearForTargets(s, targeted) else it }?.let(::withPrs)
@@ -105,11 +111,11 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
         if (index < 0) return
         val set = ex.sets[index]
         if (set.done) {
-            update { it.updateSet(exKey, setKey) { x -> x.copy(done = false, rir = null) } }
+            update { it.updateSet(exKey, setKey) { x -> x.copy(done = false, rir = null, doneAt = null) } }
             return
         }
         val hint = suggestionFor(ex, index, _previous.value[ex.exerciseId], _exercises[ex.exerciseId], unit)
-        update { it.updateSet(exKey, setKey) { x -> x.applyHint(hint).copy(done = true) } }
+        update { it.updateSet(exKey, setKey) { x -> x.applyHint(hint).copy(done = true, doneAt = System.currentTimeMillis()) } }
         val inSuperset = ex.supersetId != null
         val lastOfGroup = !inSuperset || s.exercises.last { it.supersetId == ex.supersetId }.key == exKey
         if (lastOfGroup) scope.launch { startRest(restSecondsFor(ex)) }
@@ -145,9 +151,14 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
 
     fun skipRest() = update { it.copy(restEndsAt = null) }
 
+    /** Ticked sets that look like typos, to check before they're saved. */
+    fun suspects(): List<Suspect> = _session.value?.let { suspiciousSets(it, _bests.value, ::exerciseInfo) }.orEmpty()
+
     suspend fun finish(): WorkoutSummary? {
         val s = _session.value ?: return null
-        val summary = repo.finishWorkout(s.copy(restEndsAt = null))
+        val defaultRest = repo.settings.current().defaultRestSeconds
+        val endedAt = s.realEnd(System.currentTimeMillis()) { ex -> ex.restSeconds ?: _exercises[ex.exerciseId]?.restSeconds ?: defaultRest }
+        val summary = repo.finishWorkout(s.copy(restEndsAt = null), endedAt)
         discard()
         return summary
     }
@@ -156,6 +167,7 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
         _session.value = null
         _previous.value = emptyMap()
         _bests.value = emptyMap()
+        _pace.value = null
         persist(null)
     }
 }

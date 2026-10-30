@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TrackChanges
+import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.StickyNote2
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.animation.AnimatedVisibility
@@ -105,6 +106,8 @@ import app.stronger.data.tracksEffort
 import app.stronger.data.readyToProgress
 import app.stronger.data.repTarget
 import app.stronger.data.targetFor
+import app.stronger.data.RecordChance
+import app.stronger.data.recordChance
 import app.stronger.container
 import kotlinx.coroutines.launch
 import app.stronger.data.previousFor
@@ -300,11 +303,13 @@ fun ExerciseBlock(
                     }
                     key(set.key) {
                         val target = if (live) targetFor(ex, i, previous, info, settings.unit) else null
+                        val hint = target ?: hintFor(ex, i, previous)
                         SetRow(
                             set = set, label = label, tracking = tracking, settings = settings, mode = mode,
                             previous = previousFor(ex, i, previous),
-                            hint = target ?: hintFor(ex, i, previous),
+                            hint = hint,
                             targeted = target != null,
+                            chance = if (live) recordChance(ex, i, hint, tracking, bests) else null,
                             onChange = { f -> store.update { it.updateSet(ex.key, set.key, f) } },
                             onToggle = { onToggleSet(ex.key, set.key) },
                             onDelete = { store.update { it.removeSet(ex.key, set.key) } },
@@ -414,6 +419,7 @@ private fun SetRow(
     previous: SetEntity?,
     hint: SessionSet?,
     targeted: Boolean,
+    chance: RecordChance?,
     onChange: ((SessionSet) -> SessionSet) -> Unit,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
@@ -468,11 +474,25 @@ private fun SetRow(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false,
                             )
                         }
+                        if (chance == RecordChance.ONE_MORE_REP) {
+                            Text(
+                                "+1 rep",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 11.sp),
+                                color = MaterialTheme.colorScheme.tertiary, maxLines = 1, softWrap = false,
+                            )
+                        }
                     }
                 }
                 if (set.prMask != 0 && set.done) {
                     Icon(
                         Icons.Filled.EmojiEvents, "Personal record",
+                        Modifier.size(14.dp).align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp),
+                        tint = MaterialTheme.colorScheme.tertiary,
+                    )
+                } else if (chance != null) {
+                    Icon(
+                        Icons.Outlined.EmojiEvents,
+                        if (chance == RecordChance.NOW) "A record at these numbers" else "One more rep sets a record",
                         Modifier.size(14.dp).align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp),
                         tint = MaterialTheme.colorScheme.tertiary,
                     )

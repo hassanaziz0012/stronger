@@ -7,6 +7,9 @@ A workout tracker for Android in the spirit of Strong, built with Jetpack Compos
 **Workout**
 - Start an empty workout or one from a template; resume a workout in progress from anywhere, even after the app is killed.
 - Weekly goal ring, a 7-day strip and a week streak.
+- One reminder, half an hour before you usually train, only on days when skipping would break your weekly goal or week streak.
+- "Up next": the template your rotation says comes next is listed first. Template cards show how long each usually takes.
+- A recap of last month (workouts, time, volume, records, biggest est. 1RM gains, body-weight change) for the first week of each month.
 - Templates: create, edit, duplicate, delete, preview before starting. Save any past workout as a template, or update a template with today's sets when you finish.
 
 **Live workout**
@@ -15,7 +18,10 @@ A workout tracker for Android in the spirit of Strong, built with Jetpack Compos
 - Set types: warm-up, drop set, failure. Swipe a set left to delete it.
 - Rest timer starts automatically when you complete a set (per-exercise or default rest, off per exercise). ±15 s and skip in-app and from the notification.
 - Supersets (rest starts after the last exercise in the round), exercise notes, reorder, replace, remove.
-- Live PR detection: a trophy appears on the set the moment you beat a record.
+- Live PR detection: a trophy appears on the set the moment you beat a record. Before you lift, an outlined trophy marks sets whose numbers would set one, and "+1 rep" marks sets one rep short of one.
+- Typo check: finishing with a set far beyond your best (225 kg for 22.5, 100 reps for 10) asks whether it's right before it becomes an unbeatable record. Editing or deleting an old workout re-awards trophies on the workouts after it.
+- Estimated finish time ("done ~7:40 PM") from your usual pace per set, in the workout header and notification.
+- Forgot to finish? After an hour with no set ticked you get a "Still training?" notification, and a workout finished more than 30 minutes after its last set ends one rest after that set.
 - Effort: after ticking a working set, a "Reps left?" row asks for reps in reserve (0–4+), with a guess from your best est. 1RM marked "~". Only tapped answers are saved; change them from the set-number menu, or turn the question off in Settings. Easy sets (3+ in reserve) make targets jump twice as far, and effort counts towards plateau detection, so a lift that's getting harder shows up before the numbers drop. Strong's RPE column imports as RIR.
 - Rep targets (double progression): give an exercise a rep range and each working set suggests last time's weight with one more rep; once every set reaches the top, the weight goes up (2.5 kg / 5 lb by default, or your own step) and reps reset. Assisted exercises take assistance off instead. Targets replace stale template numbers.
 - Ongoing notification, promoted to an Android 16 Live Update, with rest progress, "up next", ±15 s, skip and "Complete set". Vibration and sound when rest is over; the sound ducks music instead of pausing it.

@@ -73,8 +73,11 @@ import app.stronger.data.SessionStore
 import app.stronger.data.SetEntity
 import app.stronger.data.SetType
 import app.stronger.data.Bests
+import app.stronger.data.Suspect
+import app.stronger.data.SuspectField
 import app.stronger.data.addExercises
 import app.stronger.data.doneSetCount
+import app.stronger.data.estimatedEnd
 import app.stronger.data.replaceExercise
 import app.stronger.data.tracksEffort
 import app.stronger.data.updateSet
@@ -82,6 +85,9 @@ import app.stronger.ui.Nav
 import app.stronger.ui.components.VSpace
 import app.stronger.ui.formatClock
 import app.stronger.ui.formatDate
+import app.stronger.ui.formatSeconds
+import app.stronger.ui.formatWeightWithUnit
+import app.stronger.ui.clean
 import app.stronger.ui.exercises.ExercisePickerDialog
 import app.stronger.ui.rememberNow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -206,11 +212,14 @@ fun SessionEditorScreen(
     var replacing by remember { mutableStateOf<Long?>(null) }
     var timerSheet by remember { mutableStateOf(false) }
     var confirmFinish by remember { mutableStateOf(false) }
+    // Sets that look like typos, checked when finishing.
+    var suspects by remember { mutableStateOf(emptyList<Suspect>()) }
     var confirmDiscard by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     // The set whose "reps left?" picker is open, if any.
     var effortKey by remember { mutableStateOf<Long?>(null) }
     val bests by (if (live) c.active.bests else remember { MutableStateFlow(emptyMap<Long, Bests>()) }).collectAsStateWithLifecycle()
+    val pace by (if (live) c.active.pace else remember { MutableStateFlow<Long?>(null) }).collectAsStateWithLifecycle()
     val now = rememberNow()
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -242,7 +251,13 @@ fun SessionEditorScreen(
                         }
                     }
                     Button(
-                        onClick = { if (live) confirmFinish = true else onSave() },
+                        onClick = {
+                            if (!live) onSave()
+                            else {
+                                suspects = c.active.suspects()
+                                if (suspects.isEmpty()) confirmFinish = true
+                            }
+                        },
                         modifier = Modifier.padding(end = 8.dp),
                         shapes = ButtonDefaults.shapes(),
                     ) { Text(if (live) "Finish" else "Save") }
@@ -257,7 +272,7 @@ fun SessionEditorScreen(
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 160.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                item(key = "header") { SessionHeader(mode, session, store) }
+                item(key = "header") { SessionHeader(mode, session, store, if (live) session.estimatedEnd(pace, now) else null) }
                 items(session.exercises, key = { it.key }) { ex ->
                     val info = exercises[ex.exerciseId]
                     ExerciseBlock(
@@ -363,6 +378,35 @@ fun SessionEditorScreen(
             dismissButton = { TextButton(onClick = { confirmFinish = false }) { Text("Keep going") } },
         )
     }
+    if (suspects.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { suspects = emptyList() },
+            title = { Text(if (suspects.size == 1) "Is this set right?" else "Are these sets right?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (suspects.size == 1) "This is far beyond your best, which usually means a typo. Saved as it is, it'd become a record you can't beat."
+                        else "These are far beyond your best, which usually means a typo. Saved as they are, they'd become records you can't beat."
+                    )
+                    suspects.forEach { x ->
+                        val name = exercises[x.exercise.exerciseId]?.name ?: "Exercise"
+                        val (value, best) = when (x.field) {
+                            SuspectField.WEIGHT -> formatWeightWithUnit(x.set.weightKg ?: 0.0, settings.unit) to formatWeightWithUnit(x.best, settings.unit)
+                            SuspectField.REPS -> "${x.set.reps} reps" to "${x.best.toInt()} reps"
+                            SuspectField.TIME -> formatSeconds(x.set.seconds ?: 0) to formatSeconds(x.best.toInt())
+                            SuspectField.DISTANCE -> "${(x.set.distanceKm ?: 0.0).clean()} km" to "${x.best.clean()} km"
+                        }
+                        Text(
+                            "$name: $value" + if (x.best > 0) " (best $best)" else "",
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { suspects = emptyList() }) { Text("Fix them") } },
+            dismissButton = { TextButton(onClick = { suspects = emptyList(); confirmFinish = true }) { Text("They're right") } },
+        )
+    }
     if (confirmDiscard) {
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
@@ -387,7 +431,7 @@ fun SessionEditorScreen(
 }
 
 @Composable
-private fun SessionHeader(mode: EditorMode, session: Session, store: SessionStore) {
+private fun SessionHeader(mode: EditorMode, session: Session, store: SessionStore, estimatedEnd: Long?) {
     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp).animateContentSize()) {
         BasicTextField(
             value = session.name,
@@ -404,7 +448,7 @@ private fun SessionHeader(mode: EditorMode, session: Session, store: SessionStor
         )
         if (mode !is EditorMode.Template) {
             Text(
-                session.startedAt.formatDate("EEEE, MMM d · h:mm a"),
+                session.startedAt.formatDate("EEEE, MMM d · h:mm a") + (estimatedEnd?.let { " · done ~" + it.formatDate("h:mm a") } ?: ""),
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

@@ -126,6 +126,8 @@ data class SessionSet(
     val prMask: Int = 0,
     /** Reps in reserve the lifter reported; 4 means "4 or more". Null when not given. */
     val rir: Int? = null,
+    /** When the set was ticked in a live workout. */
+    val doneAt: Long? = null,
 )
 
 object Keys {

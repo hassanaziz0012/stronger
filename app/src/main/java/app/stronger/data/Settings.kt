@@ -33,6 +33,8 @@ data class AppSettings(
     val trackEffort: Boolean = true,
     /** When the deload suggestion was last dismissed. */
     val deloadDismissedAt: Long = 0,
+    /** The month ("2026-10") whose recap card was last dismissed. */
+    val recapDismissed: String = "",
 )
 
 class SettingsStore(private val context: Context) {
@@ -48,6 +50,8 @@ class SettingsStore(private val context: Context) {
         val health = booleanPreferencesKey("health_connect")
         val effort = booleanPreferencesKey("track_effort")
         val deloadDismissed = longPreferencesKey("deload_dismissed")
+        val recapDismissed = stringPreferencesKey("recap_dismissed")
+        val nudgedOn = stringPreferencesKey("nudged_on")
         val seeded = booleanPreferencesKey("seeded")
         val hcToken = stringPreferencesKey("hc_changes_token")
     }
@@ -68,6 +72,7 @@ class SettingsStore(private val context: Context) {
             healthConnect = this[K.health] ?: d.healthConnect,
             trackEffort = this[K.effort] ?: d.trackEffort,
             deloadDismissedAt = this[K.deloadDismissed] ?: d.deloadDismissedAt,
+            recapDismissed = this[K.recapDismissed] ?: d.recapDismissed,
         )
     }
 
@@ -87,11 +92,16 @@ class SettingsStore(private val context: Context) {
             p[K.health] = s.healthConnect
             p[K.effort] = s.trackEffort
             p[K.deloadDismissed] = s.deloadDismissedAt
+            p[K.recapDismissed] = s.recapDismissed
         }
     }
 
     suspend fun isSeeded(): Boolean = context.dataStore.data.first()[K.seeded] == true
     suspend fun markSeeded() { context.dataStore.edit { it[K.seeded] = true } }
+
+    /** The day ("2026-10-30") the last weekly-goal reminder went out, so there's one a day at most. */
+    suspend fun nudgedOn(): String? = context.dataStore.data.first()[K.nudgedOn]
+    suspend fun setNudgedOn(day: String) { context.dataStore.edit { it[K.nudgedOn] = day } }
 
     /** Health Connect changes token for incremental body-measurement imports. */
     suspend fun healthToken(): String? = context.dataStore.data.first()[K.hcToken]

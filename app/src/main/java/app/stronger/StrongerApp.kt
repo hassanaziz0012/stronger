@@ -7,6 +7,7 @@ import app.stronger.data.AppDatabase
 import app.stronger.data.Repository
 import app.stronger.data.SettingsStore
 import app.stronger.health.HealthSync
+import app.stronger.service.GoalReminder
 import app.stronger.service.WorkoutService
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -33,6 +34,7 @@ class AppContainer(private val app: Application) {
 
     init {
         scope.launch { repo.seedIfNeeded() }
+        scope.launch { GoalReminder.schedule(app) }
         scope.launch {
             active.session.map { it != null }.distinctUntilChanged().collect { running ->
                 if (running) WorkoutService.start(app) else WorkoutService.stop(app)

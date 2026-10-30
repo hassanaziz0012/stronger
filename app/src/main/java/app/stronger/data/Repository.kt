@@ -77,9 +77,28 @@ class Repository(private val db: AppDatabase, val settings: SettingsStore, priva
     fun workoutSets(id: Long) = workoutDao.observeSets(id)
     fun exerciseSets(exerciseId: Long) = workoutDao.observeExerciseSets(exerciseId)
     suspend fun deleteWorkout(id: Long) {
+        val exerciseIds = workoutDao.sets(id).map { it.exerciseId }
         workoutDao.delete(id)
         health.workoutDeleted(id)
+        refreshRecords(exerciseIds)
     }
+
+    /**
+     * Re-awards record trophies for [exerciseIds] across all history, after a workout was edited
+     * or deleted: a fixed typo stops blocking the real records that came after it.
+     */
+    private suspend fun refreshRecords(exerciseIds: Collection<Long>) {
+        val ids = exerciseIds.distinct()
+        if (ids.isEmpty()) return
+        val tracking = ids.associateWith { exerciseDao.get(it)?.tracking ?: TrackingType.WEIGHT_REPS }
+        val changed = workoutDao.exerciseSets(ids).groupBy { it.set.exerciseId }
+            .flatMap { (exId, rows) -> recomputePrMasks(rows, tracking.getValue(exId)) }
+        if (changed.isNotEmpty()) workoutDao.updateSets(changed)
+    }
+
+    /** Workouts with their set counts, for estimating pace. */
+    suspend fun workoutsWithSetCounts(): Pair<List<WorkoutEntity>, Map<Long, Int>> =
+        workoutDao.all() to workoutDao.setCounts().associate { it.workoutId to it.sets }
 
     /** Sets from the most recent workout (started before [before]) that included each exercise. */
     suspend fun previousSets(exerciseIds: List<Long>, before: Long = Long.MAX_VALUE): Map<Long, List<SetEntity>> {
@@ -172,9 +191,11 @@ class Repository(private val db: AppDatabase, val settings: SettingsStore, priva
 
     suspend fun updateWorkout(id: Long, session: Session, endedAt: Long) {
         val w = workoutDao.get(id) ?: return
+        val before = workoutDao.sets(id).map { it.exerciseId }
         val updated = w.copy(name = session.name.ifBlank { w.name }, notes = session.notes, startedAt = session.startedAt, endedAt = endedAt)
         workoutDao.replace(updated, toSetEntities(session, id))
         health.workoutSaved(id)
+        refreshRecords(before + session.exercises.map { it.exerciseId })
     }
 
     // ---- Body measurements ----

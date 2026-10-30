@@ -1,0 +1,31 @@
+# Stronger
+
+Android workout tracker (Kotlin, Compose, Material 3 Expressive). Features and layout are in README.md.
+
+## Build and test
+
+The machine is low on RAM: always use these flags and never leave daemons running. Never start an emulator.
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+./gradlew testDebugUnitTest assembleDebug --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx1536m \
+  -Pkotlin.compiler.execution.strategy=in-process -q 2>&1 | grep -v "^w: " | tail -30
+```
+
+## Device
+
+Test on the user's Pixel 9 over wireless adb. If `adb devices` shows nothing, ask the user to reconnect.
+
+```bash
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell monkey -p app.stronger -c android.intent.category.LAUNCHER 1
+```
+
+Prefer `uiautomator dump` for finding tap targets; shrink screenshots before reading them.
+
+## Notes
+
+- M3 Expressive APIs come from material3 1.5.0-beta01. Its default emphasized type styles are all Medium, so Theme.kt sets the spec weights (Bold for title medium/small and labels).
+- Don't put `SwipeToDismissBox` rows inside a `Modifier.height(IntrinsicSize.Min)` parent: it loops forever in layout and ANRs.
+- The live workout is `ActiveWorkout` (mirrored to `files/active_session.json`); templates and history edits use `LocalEditor`. Both implement `SessionStore`, and all edits are pure functions in `SessionOps.kt`.
+- Weights are stored in kg; convert only for display/input.

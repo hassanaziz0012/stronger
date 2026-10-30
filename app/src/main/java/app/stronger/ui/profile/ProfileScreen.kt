@@ -85,6 +85,7 @@ import app.stronger.ui.formatCompact
 import app.stronger.ui.formatDate
 import app.stronger.ui.formatSet
 import app.stronger.ui.fromKg
+import app.stronger.ui.plural
 import app.stronger.ui.relativeDay
 import app.stronger.ui.toKg
 import app.stronger.ui.toLocalDate
@@ -230,9 +231,9 @@ fun SettingsScreen(nav: Nav) {
             message = runCatching {
                 val r = StrongCsvImporter(c.repo).import(readText(uri), settings.unit)
                 "Import complete" to buildString {
-                    append("${r.workouts} workouts and ${r.sets} sets imported.")
-                    if (r.newExercises > 0) append(" ${r.newExercises} exercises were new and added as custom ones.")
-                    if (r.skipped > 0) append(" ${r.skipped} workouts were already here and skipped.")
+                    append("${plural(r.workouts, "workout")} and ${plural(r.sets, "set")} imported.")
+                    if (r.newExercises > 0) append(" ${plural(r.newExercises, "exercise")} new to Stronger ${if (r.newExercises == 1) "was" else "were"} added as custom.")
+                    if (r.skipped > 0) append(" ${plural(r.skipped, "workout")} already here ${if (r.skipped == 1) "was" else "were"} skipped.")
                 }
             }.getOrElse { "Import failed" to (it.message ?: "Couldn't read that file.") }
             busy = null
@@ -395,7 +396,7 @@ fun SettingsScreen(nav: Nav) {
                         busy = "Restoring…"
                         message = runCatching {
                             val b = BackupManager(c.repo).restore(readText(uri))
-                            "Restored" to "${b.workouts.size} workouts, ${b.templates.size} templates and ${b.exercises.size} exercises are back."
+                            "Restored" to "${plural(b.workouts.size, "workout")}, ${plural(b.templates.size, "template")} and ${plural(b.exercises.size, "exercise")} are back."
                         }.getOrElse { "Restore failed" to (it.message ?: "That file isn't a Stronger backup.") }
                         busy = null
                     }

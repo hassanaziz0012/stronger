@@ -19,6 +19,7 @@ import app.stronger.MainActivity
 import app.stronger.R
 import app.stronger.container
 import app.stronger.data.Session
+import app.stronger.ui.plural
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -164,7 +165,7 @@ class WorkoutService : Service() {
         }
         if (Build.VERSION.SDK_INT >= 36) {
             b.setRequestPromotedOngoing(true)
-            if (restEnds == null) b.setShortCriticalText("${session.exercises.sumOf { e -> e.sets.count { it.done } }} sets")
+            if (restEnds == null) b.setShortCriticalText(plural(session.exercises.sumOf { e -> e.sets.count { it.done } }, "set"))
         }
         return b.build()
     }

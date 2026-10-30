@@ -86,6 +86,8 @@ fun Long.relativeDay(now: Long = System.currentTimeMillis()): String {
     }
 }
 
+fun plural(n: Int, word: String, plural: String = word + "s") = "$n ${if (n == 1) word else plural}"
+
 fun ordinal(n: Int): String {
     val suffix = if (n % 100 in 11..13) "th" else when (n % 10) { 1 -> "st"; 2 -> "nd"; 3 -> "rd"; else -> "th" }
     return "$n$suffix"

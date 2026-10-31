@@ -13,6 +13,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -155,6 +159,8 @@ fun ExercisePickerDialog(
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         LightSystemBars()
         Scaffold(
+            // Include the keyboard so the Add button rides up with it while searching.
+            contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
             topBar = {
                 TopAppBar(
                     title = { Text(title) },
@@ -177,7 +183,7 @@ fun ExercisePickerDialog(
                 val byId = exercises.associateBy { it.id }
                 usage.sortedByDescending { it.lastAt }.mapNotNull { byId[it.exerciseId] }.take(6)
             }
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 96.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + 88.dp)) {
                 item { SearchField(query, { query = it }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
                 item { BodyPartChips(part, { part = it }, Modifier.padding(bottom = 8.dp)) }
                 fun row(e: ExerciseEntity, keyPrefix: String) = item(key = keyPrefix + e.id) {

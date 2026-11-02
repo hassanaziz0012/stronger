@@ -110,6 +110,10 @@ import app.stronger.data.RecordChance
 import app.stronger.data.recordChance
 import app.stronger.container
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import app.stronger.data.previousFor
 import app.stronger.data.moveExercise
 import app.stronger.data.removeExercise
@@ -654,15 +658,26 @@ private fun NumberCell(
     modifier: Modifier = Modifier,
     onChange: (String) -> Unit,
 ) {
-    var text by remember { mutableStateOf(value) }
-    LaunchedEffect(value) { if (text.toDoubleOrNull() != value.toDoubleOrNull()) text = value }
+    var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    val text = field.text
+    LaunchedEffect(value) {
+        if (text.toDoubleOrNull() != value.toDoubleOrNull()) field = TextFieldValue(value, TextRange(value.length))
+    }
+    // Focusing selects the whole value so typing replaces it. The tap that focuses the field
+    // then tries to place a caret; swallow that one selection-only change.
+    var selectingAll by remember { mutableStateOf(false) }
+    LaunchedEffect(selectingAll) { if (selectingAll) { delay(500); selectingAll = false } }
     val pattern = if (decimal) Regex("""^\d{0,5}([.]\d{0,2})?$""") else Regex("""^\d{0,5}$""")
     BasicTextField(
-        value = text,
+        value = field,
         onValueChange = { raw ->
-            val t = raw.replace(',', '.')
-            if (pattern.matches(t)) {
-                text = t
+            val t = raw.text.replace(',', '.')
+            if (t == field.text) {
+                if (!selectingAll) field = raw.copy(text = t)
+                selectingAll = false
+            } else if (pattern.matches(t)) {
+                selectingAll = false
+                field = raw.copy(text = t)
                 onChange(t)
             }
         },
@@ -675,7 +690,12 @@ private fun NumberCell(
             keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Number,
             imeAction = ImeAction.Next,
         ),
-        modifier = modifier,
+        modifier = modifier.onFocusChanged { f ->
+            if (f.isFocused && !selectingAll && field.text.isNotEmpty()) {
+                field = field.copy(selection = TextRange(0, field.text.length))
+                selectingAll = true
+            }
+        },
         decorationBox = { inner ->
             Box(
                 Modifier.fillMaxWidth().height(36.dp).clip(RoundedCornerShape(10.dp))

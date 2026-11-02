@@ -275,23 +275,42 @@ fun ExerciseBlock(
                     }
                 }
                 if (ex.note.isNotEmpty() || editingNote) {
-                    BasicTextField(
-                        value = ex.note,
-                        onValueChange = { v -> store.update { it.updateExercise(ex.key) { e -> e.copy(note = v) } } },
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onTertiaryContainer),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.tertiary),
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
-                        decorationBox = { inner ->
-                            Box(
-                                Modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.tertiaryContainer)
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                if (ex.note.isEmpty()) Text("Note for this exercise", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.6f))
-                                inner()
-                            }
+                    // Leaves composition on dismiss, so a re-added note gets a fresh swipe state.
+                    val noteDismiss = rememberSwipeToDismissBoxState()
+                    SwipeToDismissBox(
+                        state = noteDismiss,
+                        enableDismissFromStartToEnd = false,
+                        onDismiss = {
+                            editingNote = false
+                            store.update { it.updateExercise(ex.key) { e -> e.copy(note = "") } }
                         },
-                    )
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                        backgroundContent = {
+                            Box(
+                                Modifier.fillMaxWidth().fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.errorContainer)
+                                    .padding(horizontal = 16.dp),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) { Icon(Icons.Filled.Delete, "Delete note", tint = MaterialTheme.colorScheme.onErrorContainer) }
+                        },
+                    ) {
+                        BasicTextField(
+                            value = ex.note,
+                            onValueChange = { v -> store.update { it.updateExercise(ex.key) { e -> e.copy(note = v) } } },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onTertiaryContainer),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.tertiary),
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                            modifier = Modifier.fillMaxWidth(),
+                            decorationBox = { inner ->
+                                Box(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.tertiaryContainer)
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    if (ex.note.isEmpty()) Text("Note for this exercise", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.6f))
+                                    inner()
+                                }
+                            },
+                        )
+                    }
                 }
                 ColumnHeaders(tracking, info?.equipment, settings, live)
                 var normalCount = 0

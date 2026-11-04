@@ -38,6 +38,27 @@ import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.StickyNote2
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.InputChip
+import app.stronger.data.addPause
+import app.stronger.data.canRestPause
+import app.stronger.data.pauseFreeWins
+import app.stronger.data.pauseGoal
+import app.stronger.data.offersPause
+import app.stronger.data.setPause
+import app.stronger.data.withStraightReps
+import app.stronger.ui.formatReps
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import app.stronger.ui.digitsToSeconds
+import app.stronger.ui.secondsToDigits
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.AlertDialog
@@ -147,6 +168,9 @@ fun ExerciseBlock(
     onOpenExercise: () -> Unit,
     onToggleSet: (exKey: Long, setKey: Long) -> Unit,
     modifier: Modifier = Modifier,
+    onTimeSet: (exKey: Long, setKey: Long) -> Unit = { _, _ -> },
+    /** Adds a rest-pause aiming for [goal] reps; live workouts also restart the rest from it. */
+    onAddPause: (exKey: Long, setKey: Long, goal: Int?) -> Unit = { e, st, goal -> store.update { it.updateSet(e, st) { x -> x.addPause(goal) } } },
 ) {
     val live = mode == EditorMode.Live
     val tracking = info?.tracking ?: TrackingType.WEIGHT_REPS
@@ -318,6 +342,8 @@ fun ExerciseBlock(
                 }
                 ColumnHeaders(tracking, info?.equipment, settings, live)
                 var normalCount = 0
+                val pauseFree = if (live) pauseFreeWins(ex, previous).map { it.key }.toSet() else emptySet()
+                val goal = pauseGoal(ex) { i -> (if (live) targetFor(ex, i, previous, info, settings.unit) else null) ?: hintFor(ex, i, previous) }
                 ex.sets.forEachIndexed { i, set ->
                     val label = when (set.type) {
                         SetType.WARMUP -> "W"
@@ -327,6 +353,7 @@ fun ExerciseBlock(
                     key(set.key) {
                         val target = if (live) targetFor(ex, i, previous, info, settings.unit) else null
                         val hint = target ?: hintFor(ex, i, previous)
+                        val pausable = mode !is EditorMode.Template && canRestPause(set, tracking)
                         SetRow(
                             set = set, label = label, tracking = tracking, settings = settings, mode = mode,
                             previous = previousFor(ex, i, previous),
@@ -337,6 +364,9 @@ fun ExerciseBlock(
                             onToggle = { onToggleSet(ex.key, set.key) },
                             onDelete = { store.update { it.removeSet(ex.key, set.key) } },
                             onEffort = if (set.done && set.type != SetType.WARMUP && mode !is EditorMode.Template && tracksEffort(info)) ({ onEffortKey(set.key) }) else null,
+                            timing = session.setTimer?.setKey == set.key,
+                            onTime = if (live && !set.done) ({ onTimeSet(ex.key, set.key) }) else null,
+                            onRestPause = if (pausable) ({ onAddPause(ex.key, set.key, goal) }) else null,
                         )
                         AnimatedVisibility(set.done && set.key == effortKey) {
                             EffortPicker(
@@ -348,6 +378,27 @@ fun ExerciseBlock(
                                 },
                                 onDismiss = { onEffortKey(null) },
                             )
+                        }
+                        // Offer to finish a set that fell short of its reps with a rest-pause.
+                        AnimatedVisibility(pausable && (set.pauseReps.isNotEmpty() || (live && offersPause(set, goal)))) {
+                            RestPauseRow(
+                                set, goal,
+                                onAdd = { onAddPause(ex.key, set.key, goal) },
+                                onChange = { f -> store.update { it.updateSet(ex.key, set.key, f) } },
+                            )
+                        }
+                        AnimatedVisibility(set.key in pauseFree) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(start = 46.dp, top = 2.dp, bottom = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Filled.EmojiEvents, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
+                                Text(
+                                    "${set.reps} straight, no rest-pause this time",
+                                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary,
+                                )
+                            }
                         }
                     }
                 }
@@ -413,7 +464,7 @@ private fun ColumnHeaders(tracking: TrackingType, equipment: Equipment?, setting
     val fields = when (tracking) {
         TrackingType.WEIGHT_REPS -> listOf(weightLabel, "reps")
         TrackingType.REPS -> listOf("reps")
-        TrackingType.DURATION -> listOf("sec")
+        TrackingType.DURATION -> listOf("time")
         TrackingType.DISTANCE_DURATION -> listOf("km", "min")
     }
     Row(
@@ -426,6 +477,7 @@ private fun ColumnHeaders(tracking: TrackingType, equipment: Equipment?, setting
         Text("SET", Modifier.width(36.dp), style = style, color = color, textAlign = TextAlign.Center)
         if (live) Text("PREVIOUS", Modifier.weight(1.3f), style = style, color = color, textAlign = TextAlign.Center)
         fields.forEach { Text(it.uppercase(), Modifier.weight(1f), style = style, color = color, textAlign = TextAlign.Center) }
+        if (live && tracking == TrackingType.DURATION) Spacer(Modifier.width(36.dp))
         if (live) Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.Check, null, Modifier.size(16.dp), tint = color)
         }
@@ -447,6 +499,9 @@ private fun SetRow(
     onToggle: () -> Unit,
     onDelete: () -> Unit,
     onEffort: (() -> Unit)?,
+    timing: Boolean,
+    onTime: (() -> Unit)?,
+    onRestPause: (() -> Unit)?,
 ) {
     val live = mode == EditorMode.Live
     val unit = settings.unit
@@ -535,6 +590,11 @@ private fun SetRow(
                         trailingIcon = { set.rir?.let { Text(if (it >= RIR_MAX) "$RIR_MAX+" else "$it") } },
                         onClick = { typeMenu = false; onEffort() },
                     )
+                    if (onRestPause != null) DropdownMenuItem(
+                        text = { Text("Add rest-pause") },
+                        leadingIcon = { Icon(Icons.Filled.Pause, null) },
+                        onClick = { typeMenu = false; onRestPause() },
+                    )
                     HorizontalDivider()
                     DropdownMenuItem(
                         text = { Text("Delete set", color = MaterialTheme.colorScheme.error) },
@@ -551,7 +611,7 @@ private fun SetRow(
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1.3f).clip(RoundedCornerShape(10.dp))
                         .clickable(enabled = previous != null && !set.done) {
-                            previous?.let { p -> onChange { it.copy(weightKg = p.weightKg, reps = p.reps, seconds = p.seconds, distanceKm = p.distanceKm) } }
+                            previous?.let { p -> onChange { it.copy(weightKg = p.weightKg, reps = p.reps, seconds = p.seconds, distanceKm = p.distanceKm, pauseReps = emptyList()) } }
                         }
                         .padding(vertical = 8.dp),
                 )
@@ -561,15 +621,26 @@ private fun SetRow(
                     NumberCell(formatWeight(set.weightKg, unit), formatWeight(hint?.weightKg, unit), true, set.done && live, targeted, Modifier.weight(1f)) { t ->
                         onChange { it.copy(weightKg = t.toDoubleOrNull()?.let(unit::toKg)) }
                     }
-                    NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, targeted, Modifier.weight(1f)) { t ->
-                        onChange { it.copy(reps = t.toIntOrNull()) }
+                    NumberCell(set.straightReps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, targeted, Modifier.weight(1f)) { t ->
+                        onChange { it.withStraightReps(t.toIntOrNull()) }
                     }
                 }
-                TrackingType.REPS -> NumberCell(set.reps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, targeted, Modifier.weight(1f)) { t ->
-                    onChange { it.copy(reps = t.toIntOrNull()) }
+                TrackingType.REPS -> NumberCell(set.straightReps?.toString() ?: "", hint?.reps?.toString() ?: "", false, set.done && live, targeted, Modifier.weight(1f)) { t ->
+                    onChange { it.withStraightReps(t.toIntOrNull()) }
                 }
-                TrackingType.DURATION -> NumberCell(set.seconds?.toString() ?: "", hint?.seconds?.toString() ?: "", false, set.done && live, targeted, Modifier.weight(1f)) { t ->
-                    onChange { it.copy(seconds = t.toIntOrNull()) }
+                TrackingType.DURATION -> {
+                    NumberCell(
+                        secondsToDigits(set.seconds), hint?.seconds?.let { formatClock(it.toLong()) } ?: "", false, set.done && live, targeted,
+                        Modifier.weight(1f), transformation = MinSecTransformation, same = { a, b -> digitsToSeconds(a) == digitsToSeconds(b) },
+                    ) { t -> onChange { it.copy(seconds = digitsToSeconds(t)) } }
+                    if (live) Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
+                        if (onTime != null) IconButton(onClick = onTime, modifier = Modifier.size(36.dp)) {
+                            Icon(
+                                if (timing) Icons.Filled.Timer else Icons.Outlined.Timer, "Time this set",
+                                tint = if (timing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
                 TrackingType.DISTANCE_DURATION -> {
                     NumberCell(set.distanceKm?.clean() ?: "", hint?.distanceKm?.clean() ?: "", true, set.done && live, targeted, Modifier.weight(1f)) { t ->
@@ -641,9 +712,72 @@ private fun EffortPicker(selected: Int?, estimate: Int?, onPick: (Int) -> Unit, 
     }
 }
 
+/**
+ * The rest-pauses under a set, each a chip to change or remove, then one to add another and the
+ * set's total. A ticked set that fell short of [goal] with none yet gets a single chip offering to
+ * finish it with one.
+ */
+@Composable
+private fun RestPauseRow(set: SessionSet, goal: Int?, onAdd: () -> Unit, onChange: ((SessionSet) -> SessionSet) -> Unit) {
+    val total = set.reps ?: 0
+    val toGo = goal?.let { it - total }?.takeIf { it > 0 }
+    Row(
+        Modifier.fillMaxWidth().padding(start = 46.dp, end = 8.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (set.pauseReps.isEmpty()) {
+            AssistChip(
+                onClick = onAdd,
+                label = { Text(toGo?.let { "Rest-pause · $it to go" } ?: "Rest-pause") },
+                leadingIcon = { Icon(Icons.Filled.Pause, null, Modifier.size(18.dp)) },
+            )
+            return@Row
+        }
+        Icon(Icons.Filled.Pause, "Rest-paused", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.secondary)
+        FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            set.pauseReps.forEachIndexed { i, reps -> PauseChip(reps) { v -> onChange { it.setPause(i, v) } } }
+            if (toGo != null) AssistChip(
+                onClick = onAdd,
+                label = { Text("$toGo to go") },
+                leadingIcon = { Icon(Icons.Filled.Add, null, Modifier.size(18.dp)) },
+            )
+            else IconButton(onClick = onAdd, modifier = Modifier.size(32.dp).align(Alignment.CenterVertically)) {
+                Icon(Icons.Filled.Add, "Add rest-pause", Modifier.size(18.dp))
+            }
+        }
+        Text("$total total", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** One rest-pause's reps; tapping opens a stepper and a way to remove it. */
+@Composable
+private fun PauseChip(reps: Int, onSet: (Int) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        InputChip(selected = open, onClick = { open = true }, label = { Text("+$reps") })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { onSet(reps - 1) }, enabled = reps > 1) { Icon(Icons.Filled.Remove, "One rep fewer") }
+                Text(
+                    if (reps == 1) "1 rep" else "$reps reps", style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+                IconButton(onClick = { onSet(reps + 1) }) { Icon(Icons.Filled.Add, "One rep more") }
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Remove rest-pause", color = MaterialTheme.colorScheme.error) },
+                leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                onClick = { open = false; onSet(0) },
+            )
+        }
+    }
+}
+
 private fun previousText(p: SetEntity, tracking: TrackingType, unit: app.stronger.data.WeightUnit): String = when (tracking) {
-    TrackingType.WEIGHT_REPS -> "${formatWeight(p.weightKg ?: 0.0, unit)} × ${p.reps ?: 0}"
-    TrackingType.REPS -> "× ${p.reps ?: 0}"
+    TrackingType.WEIGHT_REPS -> "${formatWeight(p.weightKg ?: 0.0, unit)} × ${formatReps(p.reps, p.pauseReps)}"
+    TrackingType.REPS -> "× ${formatReps(p.reps, p.pauseReps)}"
     TrackingType.DURATION -> formatSeconds(p.seconds ?: 0)
     TrackingType.DISTANCE_DURATION -> "${(p.distanceKm ?: 0.0).clean()} km"
 }
@@ -656,12 +790,15 @@ private fun NumberCell(
     done: Boolean,
     targeted: Boolean,
     modifier: Modifier = Modifier,
+    transformation: VisualTransformation = VisualTransformation.None,
+    /** Whether the typed text already means [value], so it's left alone while typing. */
+    same: (String, String) -> Boolean = { a, b -> a.toDoubleOrNull() == b.toDoubleOrNull() },
     onChange: (String) -> Unit,
 ) {
     var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
     val text = field.text
     LaunchedEffect(value) {
-        if (text.toDoubleOrNull() != value.toDoubleOrNull()) field = TextFieldValue(value, TextRange(value.length))
+        if (!same(text, value)) field = TextFieldValue(value, TextRange(value.length))
     }
     // Focusing selects the whole value so typing replaces it. The tap that focuses the field
     // then tries to place a caret; swallow that one selection-only change.
@@ -690,7 +827,10 @@ private fun NumberCell(
             keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Number,
             imeAction = ImeAction.Next,
         ),
+        visualTransformation = transformation,
         modifier = modifier.onFocusChanged { f ->
+            // Leaving tidies what was typed into its usual form, like 90 into 1:30.
+            if (!f.isFocused && field.text != value && same(field.text, value)) field = TextFieldValue(value, TextRange(value.length))
             if (f.isFocused && !selectingAll && field.text.isNotEmpty()) {
                 field = field.copy(selection = TextRange(0, field.text.length))
                 selectingAll = true
@@ -715,4 +855,22 @@ private fun NumberCell(
             }
         },
     )
+}
+
+/** Shows a duration cell's digits as M:SS, filling from the right like a microwave: 5 → 0:05, 130 → 1:30. */
+private object MinSecTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val raw = text.text
+        val n = raw.length
+        if (n == 0) return TransformedText(text, OffsetMapping.Identity)
+        val shown = if (n <= 2) "0:" + raw.padStart(2, '0') else raw.dropLast(2) + ":" + raw.takeLast(2)
+        val pad = shown.length - n // the "0:" and zero padding in front of one or two digits
+        val mapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int =
+                if (n <= 2) offset + pad else if (offset <= n - 2) offset else offset + 1
+            override fun transformedToOriginal(offset: Int): Int =
+                if (n <= 2) (offset - pad).coerceIn(0, n) else if (offset <= n - 2) offset else (offset - 1).coerceIn(0, n)
+        }
+        return TransformedText(AnnotatedString(shown), mapping)
+    }
 }

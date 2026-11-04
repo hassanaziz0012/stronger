@@ -39,12 +39,13 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
     private val _tracking get() = _exercises.mapValues { it.value.tracking }
 
     private var unit = WeightUnit.KG
+    private var countdownSeconds = AppSettings().setCountdownSeconds
 
     init {
         _session.value?.let { refreshHistory(it) }
         // Keep exercise details fresh so target changes apply mid-workout.
         scope.launch { repo.exerciseIndex.collect { _exercises.putAll(it) } }
-        scope.launch { repo.settings.settings.collect { unit = it.unit } }
+        scope.launch { repo.settings.settings.collect { unit = it.unit; countdownSeconds = it.setCountdownSeconds } }
     }
 
     private fun load(): Session? = runCatching {
@@ -71,10 +72,17 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
                 val new = f(old)
                 val known = old.exercises.map { it.exerciseId }.toSet()
                 if (new.exercises.any { it.exerciseId !in known }) refreshHistory(new)
-                withPrs(new)
+                withPrs(new).withoutStaleTimer()
             }
         }
         persist(_session.value)
+    }
+
+    /** Drops the set timer once its set is deleted or its exercise removed. */
+    private fun Session.withoutStaleTimer(): Session {
+        val t = setTimer ?: return this
+        val exists = exercises.any { e -> e.key == t.exKey && e.sets.any { it.key == t.setKey && !it.done } }
+        return if (exists) this else copy(setTimer = null)
     }
 
     private fun withPrs(s: Session): Session {
@@ -110,6 +118,7 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
         val index = ex.sets.indexOfFirst { it.key == setKey }
         if (index < 0) return
         val set = ex.sets[index]
+        if (!set.done && s.setTimer?.setKey == setKey) return finishSetTimer()
         if (set.done) {
             update { it.updateSet(exKey, setKey) { x -> x.copy(done = false, rir = null, doneAt = null) } }
             return
@@ -119,6 +128,16 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
         val inSuperset = ex.supersetId != null
         val lastOfGroup = !inSuperset || s.exercises.last { it.supersetId == ex.supersetId }.key == exKey
         if (lastOfGroup) scope.launch { startRest(restSecondsFor(ex)) }
+    }
+
+    /**
+     * Adds a rest-pause to a set. A running rest restarts, so the rest before the next set counts
+     * from the last mini-set rather than the first.
+     */
+    fun addPause(exKey: Long, setKey: Long, goal: Int?) {
+        val s = _session.value ?: return
+        update { it.updateSet(exKey, setKey) { x -> x.addPause(goal) } }
+        if (s.restEndsAt != null) startRest(s.restTotalSeconds)
     }
 
     /** Completes the first unfinished set, e.g. from the notification. */
@@ -150,6 +169,39 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
     }
 
     fun skipRest() = update { it.copy(restEndsAt = null) }
+
+    // ---- Set timer ----
+    /** Starts timing a duration set after the get-ready countdown from settings, replacing any rest or other set timer. */
+    fun startSetTimer(exKey: Long, setKey: Long) {
+        val s = _session.value ?: return
+        val ex = s.exercises.firstOrNull { it.key == exKey } ?: return
+        val index = ex.sets.indexOfFirst { it.key == setKey }
+        if (index < 0) return
+        val target = suggestionFor(ex, index, _previous.value[ex.exerciseId], _exercises[ex.exerciseId], unit)?.seconds
+        val timer = SetTimer(exKey, setKey, System.currentTimeMillis() + countdownSeconds.coerceAtLeast(0) * 1000L, targetSeconds = target?.takeIf { it > 0 })
+        update { it.copy(setTimer = timer, restEndsAt = null) }
+    }
+
+    /** Skips the rest of the get-ready countdown. */
+    fun goNow() = updateTimer { t, now -> if (t.startedAt > now && !t.paused) t.copy(startedAt = now) else t }
+
+    fun pauseSetTimer() = updateTimer { t, now -> if (t.paused) t else t.copy(pausedAt = now.coerceAtLeast(t.startedAt)) }
+
+    fun resumeSetTimer() = updateTimer { t, now -> t.pausedAt?.let { p -> t.copy(startedAt = t.startedAt + (now - p), pausedAt = null) } ?: t }
+
+    fun cancelSetTimer() = update { it.copy(setTimer = null) }
+
+    /** Logs the time on the set and ticks it, which starts the rest timer as usual. */
+    fun finishSetTimer() {
+        val t = _session.value?.setTimer ?: return
+        val seconds = (t.elapsedMillis(System.currentTimeMillis()) / 1000).toInt()
+        update { s -> s.copy(setTimer = null).let { if (seconds > 0) it.updateSet(t.exKey, t.setKey) { x -> x.copy(seconds = seconds) } else it } }
+        toggleSet(t.exKey, t.setKey)
+    }
+
+    private fun updateTimer(f: (SetTimer, Long) -> SetTimer) = update { s ->
+        s.setTimer?.let { s.copy(setTimer = f(it, System.currentTimeMillis())) } ?: s
+    }
 
     /** Ticked sets that look like typos, to check before they're saved. */
     fun suspects(): List<Suspect> = _session.value?.let { suspiciousSets(it, _bests.value, ::exerciseInfo) }.orEmpty()

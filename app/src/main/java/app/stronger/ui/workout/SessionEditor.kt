@@ -30,6 +30,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.AlertDialog
@@ -71,6 +73,7 @@ import app.stronger.data.Repository
 import app.stronger.data.Session
 import app.stronger.data.SessionStore
 import app.stronger.data.SetEntity
+import app.stronger.data.SetTimer
 import app.stronger.data.SetType
 import app.stronger.data.Bests
 import app.stronger.data.Suspect
@@ -81,6 +84,7 @@ import app.stronger.data.estimatedEnd
 import app.stronger.data.replaceExercise
 import app.stronger.data.tracksEffort
 import app.stronger.data.updateSet
+import app.stronger.data.addPause
 import app.stronger.ui.Nav
 import app.stronger.ui.components.VSpace
 import app.stronger.ui.formatClock
@@ -303,6 +307,10 @@ fun SessionEditorScreen(
                             }
                         },
                         modifier = Modifier.animateItem(),
+                        onTimeSet = { e, st ->
+                            if (session.setTimer?.setKey == st) c.active.cancelSetTimer() else c.active.startSetTimer(e, st)
+                        },
+                        onAddPause = if (live) c.active::addPause else { e, st, goal -> store.update { it.updateSet(e, st) { x -> x.addPause(goal) } } },
                     )
                 }
                 item(key = "footer") {
@@ -327,12 +335,30 @@ fun SessionEditorScreen(
             }
             if (live) {
                 AnimatedVisibility(
-                    session.restEndsAt != null && session.restEndsAt > now,
+                    session.setTimer == null && session.restEndsAt != null && session.restEndsAt > now,
                     enter = slideInVertically { it } + fadeIn(),
                     exit = slideOutVertically { it } + fadeOut(),
                     modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
                 ) {
                     RestToolbar(session, now)
+                }
+                // Holds the last timer while sliding away, so the toolbar doesn't empty out mid-exit.
+                var shownTimer by remember { mutableStateOf(session.setTimer) }
+                session.setTimer?.let { shownTimer = it }
+                AnimatedVisibility(
+                    session.setTimer != null,
+                    enter = slideInVertically { it } + fadeIn(),
+                    exit = slideOutVertically { it } + fadeOut(),
+                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
+                ) {
+                    shownTimer?.let { t ->
+                        val ex = session.exercises.firstOrNull { it.key == t.exKey }
+                        val setNumber = ex?.sets?.filter { it.type != SetType.WARMUP }?.indexOfFirst { it.key == t.setKey }?.plus(1) ?: 0
+                        SetTimerToolbar(
+                            t, now,
+                            title = (ex?.let { exercises[it.exerciseId]?.name } ?: "Set") + if (setNumber > 0) " · set $setNumber" else "",
+                        )
+                    }
                 }
             }
         }
@@ -465,6 +491,62 @@ private fun SessionHeader(mode: EditorMode, session: Session, store: SessionStor
                 inner()
             },
         )
+    }
+}
+
+/** The stopwatch for a duration set: counts up after a short get-ready countdown, toward the set's goal. */
+@Composable
+private fun SetTimerToolbar(timer: SetTimer, now: Long, title: String) {
+    val active = LocalContext.current.container.active
+    val elapsed = timer.elapsedMillis(now)
+    val ready = elapsed < 0
+    val seconds = (elapsed / 1000).coerceAtLeast(0)
+    val target = timer.targetSeconds
+    androidx.compose.material3.Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shadowElevation = 6.dp,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                when {
+                    ready -> "Get ready · $title"
+                    timer.paused -> "Paused · $title"
+                    else -> title
+                },
+                style = MaterialTheme.typography.labelLargeEmphasized, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { active.cancelSetTimer() }) { Icon(Icons.Filled.Close, "Cancel timer") }
+                Text(
+                    if (ready) "${(-elapsed + 999) / 1000}" else formatClock(seconds),
+                    style = MaterialTheme.typography.displaySmallEmphasized.copy(fontFeatureSettings = "tnum"),
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+                if (ready) {
+                    FilledTonalButton(onClick = { active.goNow() }, shapes = ButtonDefaults.shapes()) { Text("Go") }
+                } else {
+                    IconButton(onClick = { if (timer.paused) active.resumeSetTimer() else active.pauseSetTimer() }) {
+                        Icon(if (timer.paused) Icons.Filled.PlayArrow else Icons.Filled.Pause, if (timer.paused) "Resume" else "Pause")
+                    }
+                    Button(onClick = { active.finishSetTimer() }, shapes = ButtonDefaults.shapes()) { Text("Done") }
+                }
+            }
+            if (target != null) {
+                LinearWavyProgressIndicator(
+                    progress = { (seconds.toFloat() / target).coerceIn(0f, 1f) },
+                    color = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).size(width = 260.dp, height = 10.dp),
+                )
+                Text(
+                    if (seconds < target) "Goal ${formatClock(target.toLong())}" else "Goal hit · +${formatClock(seconds - target)}",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
     }
 }
 

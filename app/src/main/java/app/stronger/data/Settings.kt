@@ -22,6 +22,8 @@ data class AppSettings(
     val defaultRestSeconds: Int = 120,
     val timerVibrate: Boolean = true,
     val timerSound: Boolean = true,
+    /** Seconds to get into position before a set timer starts counting; 0 starts it at once. */
+    val setCountdownSeconds: Int = 3,
     val keepScreenOn: Boolean = true,
     val barWeightKg: Double = 20.0,
     /** Plate sizes in the user's unit, heaviest first. */
@@ -43,6 +45,7 @@ class SettingsStore(private val context: Context) {
         val rest = intPreferencesKey("rest")
         val vibrate = booleanPreferencesKey("vibrate")
         val sound = booleanPreferencesKey("sound")
+        val setCountdown = intPreferencesKey("set_countdown")
         val screenOn = booleanPreferencesKey("screen_on")
         val bar = doublePreferencesKey("bar")
         val plates = stringPreferencesKey("plates")
@@ -65,6 +68,7 @@ class SettingsStore(private val context: Context) {
             defaultRestSeconds = this[K.rest] ?: d.defaultRestSeconds,
             timerVibrate = this[K.vibrate] ?: d.timerVibrate,
             timerSound = this[K.sound] ?: d.timerSound,
+            setCountdownSeconds = this[K.setCountdown] ?: d.setCountdownSeconds,
             keepScreenOn = this[K.screenOn] ?: d.keepScreenOn,
             barWeightKg = this[K.bar] ?: d.barWeightKg,
             plates = this[K.plates]?.split(',')?.mapNotNull { it.toDoubleOrNull() } ?: d.plates,
@@ -85,6 +89,7 @@ class SettingsStore(private val context: Context) {
             p[K.rest] = s.defaultRestSeconds
             p[K.vibrate] = s.timerVibrate
             p[K.sound] = s.timerSound
+            p[K.setCountdown] = s.setCountdownSeconds
             p[K.screenOn] = s.keepScreenOn
             p[K.bar] = s.barWeightKg
             p[K.plates] = s.plates.joinToString(",")

@@ -102,7 +102,27 @@ data class Session(
     val exercises: List<SessionExercise> = emptyList(),
     val restEndsAt: Long? = null,
     val restTotalSeconds: Int = 0,
+    /** A stopwatch timing one set of a duration exercise, if running. */
+    val setTimer: SetTimer? = null,
 )
+
+/**
+ * Times a duration set. [startedAt] starts in the future by the get-ready countdown, to give you
+ * time to get into position; pausing records [pausedAt], and resuming shifts [startedAt] by the pause.
+ */
+@Serializable
+data class SetTimer(
+    val exKey: Long,
+    val setKey: Long,
+    val startedAt: Long,
+    val pausedAt: Long? = null,
+    /** Seconds to beat, from the set's target or last time. */
+    val targetSeconds: Int? = null,
+) {
+    /** Milliseconds timed so far; negative while still counting down to the start. */
+    fun elapsedMillis(now: Long): Long = (pausedAt ?: now) - startedAt
+    val paused get() = pausedAt != null
+}
 
 @Serializable
 data class SessionExercise(
@@ -128,7 +148,12 @@ data class SessionSet(
     val rir: Int? = null,
     /** When the set was ticked in a live workout. */
     val doneAt: Long? = null,
-)
+    /** Reps done after each rest-pause, in order. [reps] is the total, these included. */
+    val pauseReps: List<Int> = emptyList(),
+) {
+    /** Reps before the first rest-pause: what records and progression go by. */
+    val straightReps: Int? get() = reps?.let { (it - pauseReps.sum()).coerceAtLeast(0) }
+}
 
 object Keys {
     private var last = 0L

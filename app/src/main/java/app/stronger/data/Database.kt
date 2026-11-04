@@ -2,6 +2,7 @@ package app.stronger.data
 
 import android.content.Context
 import androidx.room.AutoMigration
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Embedded
@@ -15,6 +16,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
+import androidx.room.TypeConverter
+import androidx.room.TypeConverters
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
@@ -77,9 +80,19 @@ data class SetEntity(
     val restSeconds: Int? = null,
     /** Reps in reserve, when the lifter gave it. */
     val rir: Int? = null,
+    /** Reps done after each rest-pause; [reps] is the total, these included. */
+    @ColumnInfo(defaultValue = "") val pauseReps: List<Int> = emptyList(),
 ) {
+    /** Reps before the first rest-pause. */
+    val straightReps: Int get() = ((reps ?: 0) - pauseReps.sum()).coerceAtLeast(0)
     val volumeKg: Double get() = (weightKg ?: 0.0) * (reps ?: 0)
-    val oneRm: Double get() = estimatedOneRepMax(weightKg ?: 0.0, reps ?: 0)
+    /** Goes by [straightReps]: reps squeezed out after a pause would overstate strength. */
+    val oneRm: Double get() = estimatedOneRepMax(weightKg ?: 0.0, straightReps)
+}
+
+class Converters {
+    @TypeConverter fun fromInts(v: List<Int>): String = v.joinToString(",")
+    @TypeConverter fun toInts(v: String): List<Int> = v.split(',').mapNotNull { it.trim().toIntOrNull() }
 }
 
 @Serializable
@@ -285,10 +298,11 @@ interface MaintenanceDao {
 
 @Database(
     entities = [ExerciseEntity::class, WorkoutEntity::class, SetEntity::class, TemplateEntity::class, MeasurementEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
 )
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun exercises(): ExerciseDao
     abstract fun workouts(): WorkoutDao

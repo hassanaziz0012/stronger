@@ -78,18 +78,43 @@ fun formatDurationShort(millis: Long): String {
     }
 }
 
+/**
+ * Duration cells hold plain digits and show them as M:SS, so 130 reads 1:30 and you never type a
+ * colon. The last two digits are seconds and anything over 59 carries, so 90 is 90 seconds.
+ */
+fun secondsToDigits(sec: Int?): String = when {
+    sec == null -> ""
+    sec < 60 -> sec.toString()
+    else -> "${sec / 60}%02d".format(sec % 60)
+}
+
+fun digitsToSeconds(digits: String): Int? {
+    if (digits.isEmpty() || !digits.all(Char::isDigit)) return null
+    val minutes = digits.dropLast(2).toIntOrNull() ?: 0
+    return minutes * 60 + digits.takeLast(2).toInt()
+}
+
 fun formatSeconds(sec: Int): String = if (sec >= 60) formatClock(sec.toLong()) else "${sec}s"
 
 fun formatSet(set: SetEntity, tracking: TrackingType, unit: WeightUnit): String =
-    formatSetValues(set.weightKg, set.reps, set.seconds, set.distanceKm, tracking, unit)
+    formatSetValues(set.weightKg, set.reps, set.seconds, set.distanceKm, tracking, unit, set.pauseReps)
 
 fun formatSet(set: SessionSet, tracking: TrackingType, unit: WeightUnit): String =
-    formatSetValues(set.weightKg, set.reps, set.seconds, set.distanceKm, tracking, unit)
+    formatSetValues(set.weightKg, set.reps, set.seconds, set.distanceKm, tracking, unit, set.pauseReps)
 
-fun formatSetValues(weightKg: Double?, reps: Int?, seconds: Int?, distanceKm: Double?, tracking: TrackingType, unit: WeightUnit): String =
+/** Reps as done: "12", or "8+1+3" when rest-paused. */
+fun formatReps(reps: Int?, pauses: List<Int>): String {
+    val total = reps ?: 0
+    if (pauses.isEmpty()) return "$total"
+    return (listOf((total - pauses.sum()).coerceAtLeast(0)) + pauses).joinToString("+")
+}
+
+fun formatSetValues(
+    weightKg: Double?, reps: Int?, seconds: Int?, distanceKm: Double?, tracking: TrackingType, unit: WeightUnit, pauses: List<Int> = emptyList(),
+): String =
     when (tracking) {
-        TrackingType.WEIGHT_REPS -> "${formatWeight(weightKg ?: 0.0, unit)} ${unit.label} × ${reps ?: 0}"
-        TrackingType.REPS -> "${reps ?: 0} reps"
+        TrackingType.WEIGHT_REPS -> "${formatWeight(weightKg ?: 0.0, unit)} ${unit.label} × ${formatReps(reps, pauses)}"
+        TrackingType.REPS -> "${formatReps(reps, pauses)} reps"
         TrackingType.DURATION -> formatSeconds(seconds ?: 0)
         TrackingType.DISTANCE_DURATION -> "${(distanceKm ?: 0.0).clean()} km · ${formatClock((seconds ?: 0).toLong())}"
     }

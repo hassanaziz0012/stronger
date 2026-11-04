@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.MonitorHeart
@@ -337,8 +338,27 @@ fun SettingsScreen(nav: Nav) {
                     },
                 )
             }
-            group("Rest timer alert") {
+            group("Timers") {
                 listOf(
+                    {
+                        Row1(
+                            Icons.Outlined.HourglassTop, "Set timer countdown",
+                            "Time to get into position before a timed set starts", it,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { update { s -> s.copy(setCountdownSeconds = (s.setCountdownSeconds - 1).coerceAtLeast(0)) } }) {
+                                    Icon(Icons.Filled.Remove, "Shorter")
+                                }
+                                Text(
+                                    if (settings.setCountdownSeconds == 0) "Off" else "${settings.setCountdownSeconds}s",
+                                    style = MaterialTheme.typography.titleMediumEmphasized,
+                                )
+                                IconButton(onClick = { update { s -> s.copy(setCountdownSeconds = (s.setCountdownSeconds + 1).coerceAtMost(60)) } }) {
+                                    Icon(Icons.Filled.Add, "Longer")
+                                }
+                            }
+                        }
+                    },
                     { Row1(Icons.Outlined.Vibration, "Vibrate", null, it) { Switch(settings.timerVibrate, { v -> update { s -> s.copy(timerVibrate = v) } }) } },
                     { Row1(Icons.Outlined.VolumeUp, "Sound", null, it) { Switch(settings.timerSound, { v -> update { s -> s.copy(timerSound = v) } }) } },
                 )

@@ -225,10 +225,11 @@ fun ExercisesScreen(nav: Nav) {
 
 private data class ExerciseSession(val workoutId: Long, val startedAt: Long, val name: String, val sets: List<app.stronger.data.SetEntity>)
 
-private enum class Metric(val label: String) { ONE_RM("Est. 1RM"), WEIGHT("Max weight"), VOLUME("Volume"), REPS("Max reps"), TIME("Longest"), DISTANCE("Distance") }
+private enum class Metric(val label: String) { ONE_RM("Est. 1RM"), WEIGHT("Max weight"), VOLUME("Volume"), REPS("Max reps"), STRAIGHT("Unbroken reps"), TIME("Longest"), DISTANCE("Distance") }
 
-private fun metricsFor(t: TrackingType) = when (t) {
-    TrackingType.WEIGHT_REPS -> listOf(Metric.ONE_RM, Metric.WEIGHT, Metric.VOLUME)
+/** Unbroken reps shows once the exercise has been rest-paused, to track working toward no pauses. */
+private fun metricsFor(t: TrackingType, restPaused: Boolean) = when (t) {
+    TrackingType.WEIGHT_REPS -> listOf(Metric.ONE_RM, Metric.WEIGHT, Metric.VOLUME) + if (restPaused) listOf(Metric.STRAIGHT) else emptyList()
     TrackingType.REPS -> listOf(Metric.REPS, Metric.VOLUME)
     TrackingType.DURATION -> listOf(Metric.TIME)
     TrackingType.DISTANCE_DURATION -> listOf(Metric.DISTANCE, Metric.TIME)
@@ -240,7 +241,7 @@ private fun ExerciseSession.value(m: Metric): Double {
         Metric.ONE_RM -> working.maxOf { it.oneRm }
         Metric.WEIGHT -> working.maxOf { it.weightKg ?: 0.0 }
         Metric.VOLUME -> working.sumOf { if (it.weightKg != null) it.volumeKg else (it.reps ?: 0).toDouble() }
-        Metric.REPS -> working.maxOf { (it.reps ?: 0).toDouble() }
+        Metric.REPS, Metric.STRAIGHT -> working.maxOf { it.straightReps.toDouble() }
         Metric.TIME -> working.maxOf { (it.seconds ?: 0).toDouble() }
         Metric.DISTANCE -> working.sumOf { it.distanceKm ?: 0.0 }
     }
@@ -250,7 +251,7 @@ private fun Metric.format(v: Double, unit: WeightUnit, tracking: TrackingType): 
     Metric.ONE_RM -> "${formatOneRm(v, unit)} ${unit.label}"
     Metric.WEIGHT -> "${formatWeight(v, unit)} ${unit.label}"
     Metric.VOLUME -> if (tracking == TrackingType.REPS) "${v.toInt()} reps" else "${app.stronger.ui.formatCompact(unit.fromKg(v))} ${unit.label}"
-    Metric.REPS -> "${v.toInt()} reps"
+    Metric.REPS, Metric.STRAIGHT -> "${v.toInt()} reps"
     Metric.TIME -> formatSeconds(v.toInt())
     Metric.DISTANCE -> "${v.clean()} km"
 }
@@ -330,7 +331,7 @@ fun ExerciseDetailScreen(id: Long, nav: Nav) {
 
 @Composable
 private fun SummaryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, settings: AppSettings, onSaveExercise: (ExerciseEntity) -> Unit) {
-    val metrics = metricsFor(e.tracking)
+    val metrics = metricsFor(e.tracking, sessions.any { s -> s.sets.any { it.pauseReps.isNotEmpty() } })
     var targets by remember { mutableStateOf(false) }
     if (targets) TargetsSheet(e, settings.unit, onSave = { targets = false; onSaveExercise(it) }, onDismiss = { targets = false })
     var metric by remember(e.tracking) { mutableStateOf(metrics.first()) }
@@ -538,7 +539,7 @@ private fun RecordsTab(e: ExerciseEntity, sessions: List<ExerciseSession>, setti
                 sessions.maxByOrNull { it.value(Metric.VOLUME) }?.let { s -> add(Rec("Best workout volume", Metric.VOLUME.format(s.value(Metric.VOLUME), unit, e.tracking), s.startedAt)) }
             }
             TrackingType.REPS -> {
-                all.maxByOrNull { it.second.reps ?: 0 }?.let { (s, set) -> add(Rec("Max reps", "${set.reps} reps", s.startedAt)) }
+                all.maxByOrNull { it.second.straightReps }?.let { (s, set) -> add(Rec("Max reps", "${set.straightReps} reps", s.startedAt)) }
                 sessions.maxByOrNull { it.value(Metric.VOLUME) }?.let { s -> add(Rec("Most reps in a workout", "${s.value(Metric.VOLUME).toInt()} reps", s.startedAt)) }
             }
             TrackingType.DURATION -> all.maxByOrNull { it.second.seconds ?: 0 }?.let { (s, set) -> add(Rec("Longest", formatSeconds(set.seconds ?: 0), s.startedAt)) }
@@ -568,7 +569,7 @@ private fun RecordsTab(e: ExerciseEntity, sessions: List<ExerciseSession>, setti
                         Text("Heaviest weight you've moved for each rep count", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         VSpace(8.dp)
                         (1..12).forEach { reps ->
-                            val best = all.filter { (it.second.reps ?: 0) >= reps }.maxByOrNull { it.second.weightKg ?: 0.0 }
+                            val best = all.filter { it.second.straightReps >= reps }.maxByOrNull { it.second.weightKg ?: 0.0 }
                             if (best != null && (best.second.weightKg ?: 0.0) > 0) {
                                 Row(Modifier.padding(vertical = 4.dp)) {
                                     Text("$reps RM", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)

@@ -23,8 +23,11 @@ import app.stronger.R
 import app.stronger.container
 import app.stronger.data.FORGOTTEN_AFTER_MS
 import app.stronger.data.Session
+import app.stronger.data.SetTimer
+import app.stronger.data.SetType
 import app.stronger.data.estimatedEnd
 import app.stronger.data.lastActivityAt
+import app.stronger.ui.formatClock
 import app.stronger.ui.formatDate
 import app.stronger.ui.plural
 import kotlinx.coroutines.Job
@@ -38,7 +41,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Keeps a workout alive while the app is in the background: an ongoing notification (promoted to
- * a Live Update on Android 16+) with the rest countdown, and an alert when rest is over.
+ * a Live Update on Android 16+) with the rest countdown or set stopwatch, and an alert when rest is over.
  */
 class WorkoutService : Service() {
     private val scope = MainScope()
@@ -61,6 +64,9 @@ class WorkoutService : Service() {
             ACTION_SUB -> active.adjustRest(-15)
             ACTION_SKIP -> active.skipRest()
             ACTION_COMPLETE -> active.completeNextSet()
+            ACTION_PAUSE -> active.pauseSetTimer()
+            ACTION_RESUME -> active.resumeSetTimer()
+            ACTION_DONE -> active.finishSetTimer()
         }
         val session = active.session.value
         if (session == null) {
@@ -80,6 +86,7 @@ class WorkoutService : Service() {
                 return@collectLatest
             }
             nm.notify(ONGOING_ID, build(session))
+            session.setTimer?.let { return@collectLatest watchSetTimer(it) }
             val endsAt = session.restEndsAt ?: return@collectLatest askIfStillTraining(session)
             // Tick the progress bar while resting, then alert once rest is over.
             while (currentCoroutineContext().isActive && System.currentTimeMillis() < endsAt) {
@@ -92,6 +99,54 @@ class WorkoutService : Service() {
                 active.skipRest()
             }
         }
+    }
+
+    /** Alerts when the get-ready countdown ends, so you know to start, and again at the set's goal. */
+    private suspend fun watchSetTimer(timer: SetTimer) {
+        if (timer.paused) return
+        val goAt = timer.startedAt
+        if (goAt > System.currentTimeMillis()) {
+            delay(goAt - System.currentTimeMillis())
+            setStarted(timer)
+            active.session.value?.let { nm.notify(ONGOING_ID, build(it)) }
+        }
+        val target = timer.targetSeconds ?: return
+        val goalAt = goAt + target * 1000L
+        // A goal passed before this started watching (e.g. after a pause) was already announced.
+        if (goalAt <= System.currentTimeMillis()) return
+        delay(goalAt - System.currentTimeMillis())
+        val s = container.settings.current()
+        if (s.timerVibrate) vibrate(longArrayOf(0, 250, 120, 250))
+        if (s.timerSound) playChime()
+    }
+
+    private suspend fun setStarted(timer: SetTimer) {
+        val s = container.settings.current()
+        if (s.timerVibrate) vibrate(longArrayOf(0, 400))
+        if (s.timerSound) playChime()
+        nm.notify(
+            ALERT_ID,
+            Notification.Builder(this, ALERT_CHANNEL)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("Go!")
+                .setContentText(setTimerName(timer) + (timer.targetSeconds?.let { " · goal ${formatClock(it.toLong())}" } ?: ""))
+                .setContentIntent(openApp())
+                .setAutoCancel(true)
+                .setTimeoutAfter(10_000)
+                .setCategory(Notification.CATEGORY_ALARM)
+                .build(),
+        )
+    }
+
+    private fun setTimerName(timer: SetTimer): String {
+        val ex = active.session.value?.exercises?.firstOrNull { it.key == timer.exKey } ?: return "Timed set"
+        val name = active.exerciseInfo(ex.exerciseId)?.name ?: "Timed set"
+        val number = ex.sets.filter { it.type != SetType.WARMUP }.indexOfFirst { it.key == timer.setKey } + 1
+        return if (number > 0) "$name · set $number" else name
+    }
+
+    private fun vibrate(pattern: LongArray) {
+        getSystemService(VibratorManager::class.java)?.defaultVibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
     }
 
     /**
@@ -124,11 +179,7 @@ class WorkoutService : Service() {
 
     private suspend fun restOver() {
         val s = container.settings.current()
-        if (s.timerVibrate) {
-            getSystemService(VibratorManager::class.java)?.defaultVibrator?.vibrate(
-                VibrationEffect.createWaveform(longArrayOf(0, 250, 120, 250, 120, 450), -1)
-            )
-        }
+        if (s.timerVibrate) vibrate(longArrayOf(0, 250, 120, 250, 120, 450))
         if (s.timerSound) playChime()
         nm.notify(
             ALERT_ID,
@@ -193,7 +244,22 @@ class WorkoutService : Service() {
             .setShowWhen(true)
         session.estimatedEnd(active.pace.value, now)?.let { b.setSubText("Done ~" + it.formatDate("h:mm a")) }
 
-        if (restEnds != null) {
+        val timer = session.setTimer
+        if (timer != null) {
+            val goal = timer.targetSeconds?.let { " · goal ${formatClock(it.toLong())}" } ?: ""
+            b.setContentText(setTimerName(timer) + goal)
+            if (timer.paused) {
+                b.setContentTitle("Paused at ${formatClock(timer.elapsedMillis(now) / 1000)}")
+                    .setUsesChronometer(false).setShowWhen(false)
+                    .addAction(action("Resume", ACTION_RESUME, 5))
+            } else {
+                b.setContentTitle(if (timer.startedAt > now) "Get ready" else "Timing set")
+                    .setWhen(timer.startedAt)
+                    .setChronometerCountDown(timer.startedAt > now)
+                    .addAction(action("Pause", ACTION_PAUSE, 6))
+            }
+            b.addAction(action("Done", ACTION_DONE, 7))
+        } else if (restEnds != null) {
             val total = session.restTotalSeconds.coerceAtLeast(1)
             val left = ((restEnds - now) / 1000).toInt().coerceIn(0, total)
             b.setContentTitle("Resting")
@@ -220,7 +286,9 @@ class WorkoutService : Service() {
         }
         if (Build.VERSION.SDK_INT >= 36) {
             b.setRequestPromotedOngoing(true)
-            if (restEnds == null) b.setShortCriticalText(plural(session.exercises.sumOf { e -> e.sets.count { it.done } }, "set"))
+            // A running stopwatch shows its chronometer in the status chip; a paused one its time.
+            if (timer != null) { if (timer.paused) b.setShortCriticalText(formatClock(timer.elapsedMillis(now) / 1000)) }
+            else if (restEnds == null) b.setShortCriticalText(plural(session.exercises.sumOf { e -> e.sets.count { it.done } }, "set"))
         }
         return b.build()
     }
@@ -247,7 +315,7 @@ class WorkoutService : Service() {
         )
         nm.createNotificationChannel(NotificationChannel(REMINDER_CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(
-            NotificationChannel(ALERT_CHANNEL, "Rest timer", NotificationManager.IMPORTANCE_HIGH).apply {
+            NotificationChannel(ALERT_CHANNEL, "Timer alerts", NotificationManager.IMPORTANCE_HIGH).apply {
                 setSound(null, null) // Sound and vibration are played directly so settings can toggle them.
                 enableVibration(false)
             }
@@ -270,6 +338,9 @@ class WorkoutService : Service() {
         private const val ACTION_SUB = "sub"
         private const val ACTION_SKIP = "skip"
         private const val ACTION_COMPLETE = "complete"
+        private const val ACTION_PAUSE = "pause"
+        private const val ACTION_RESUME = "resume"
+        private const val ACTION_DONE = "done"
 
         fun start(context: Context) {
             runCatching { context.startForegroundService(Intent(context, WorkoutService::class.java)) }

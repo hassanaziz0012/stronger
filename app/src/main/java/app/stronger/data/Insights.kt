@@ -32,8 +32,8 @@ data class ProgressStatus(val trend: Trend, val sessionsSinceBest: Int, val best
 fun sessionScore(sets: List<SetEntity>, tracking: TrackingType): Double {
     val working = sets.filter { it.type != SetType.WARMUP }
     return when (tracking) {
-        TrackingType.WEIGHT_REPS -> working.maxOfOrNull { effortOneRepMax(it.weightKg ?: 0.0, it.reps ?: 0, it.rir) } ?: 0.0
-        TrackingType.REPS -> working.maxOfOrNull { ((it.reps ?: 0) + (it.rir ?: 0)).toDouble() } ?: 0.0
+        TrackingType.WEIGHT_REPS -> working.maxOfOrNull { effortOneRepMax(it.weightKg ?: 0.0, it.straightReps, it.rir) } ?: 0.0
+        TrackingType.REPS -> working.maxOfOrNull { (it.straightReps + (it.rir ?: 0)).toDouble() } ?: 0.0
         TrackingType.DURATION -> working.maxOfOrNull { (it.seconds ?: 0).toDouble() } ?: 0.0
         TrackingType.DISTANCE_DURATION -> 0.0
     }

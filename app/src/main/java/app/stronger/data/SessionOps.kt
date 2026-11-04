@@ -71,12 +71,12 @@ fun Session.removeSet(exKey: Long, setKey: Long) =
 
 /** A template keeps targets but never completion state. */
 fun Session.asTemplateExercises() = exercises.map { ex ->
-    ex.copy(sets = ex.sets.map { it.copy(done = false, prMask = 0, rir = null, doneAt = null) })
+    ex.copy(sets = ex.sets.map { it.copy(done = false, prMask = 0, rir = null, doneAt = null, pauseReps = emptyList()) })
 }
 
 /** Starts a workout from template exercises with fresh keys. */
 fun List<SessionExercise>.freshCopy() = map { ex ->
-    ex.copy(key = Keys.next(), sets = ex.sets.map { it.copy(key = Keys.next(), done = false, prMask = 0, rir = null, doneAt = null) })
+    ex.copy(key = Keys.next(), sets = ex.sets.map { it.copy(key = Keys.next(), done = false, prMask = 0, rir = null, doneAt = null, pauseReps = emptyList()) })
 }
 
 val Session.doneSetCount get() = exercises.sumOf { ex -> ex.sets.count { it.done } }
@@ -131,7 +131,7 @@ private fun SetType.isWorking() = this == SetType.NORMAL || this == SetType.FAIL
 /** True when every working set last time reached the top of the range, so the weight goes up. */
 fun readyToProgress(previous: List<SetEntity>?, target: RepTarget): Boolean {
     val working = previous.orEmpty().filter { it.type.isWorking() }
-    return working.isNotEmpty() && working.all { (it.reps ?: 0) >= target.max }
+    return working.isNotEmpty() && working.all { it.straightReps >= target.max }
 }
 
 /** Reported this many reps in reserve or more on every working set: it was easy, so progress faster. */
@@ -142,7 +142,8 @@ private fun List<SetEntity>.allEasy() = isNotEmpty() && all { (it.rir ?: -1) >= 
 /**
  * Double progression: keep the weight and add a rep each session until every working set reaches
  * the top of the range, then add [RepTarget.incrementKg] (take it off, for assisted exercises)
- * and start again from the bottom. Warm-ups and drop sets have no target. When every working set
+ * and start again from the bottom. Rest-paused reps count toward the next target but not toward
+ * progressing, so the weight stays until the whole range is done without pausing. Warm-ups and drop sets have no target. When every working set
  * was reported as easy ([EASY_RIR]+ reps in reserve), the jump is doubled: two reps, or two
  * increments.
  */
@@ -245,14 +246,15 @@ fun bestsOf(sets: List<SetEntity>): Bests {
         weight = working.filter { (it.reps ?: 0) > 0 }.maxOfOrNull { it.weightKg ?: 0.0 } ?: 0.0,
         oneRm = working.maxOfOrNull { it.oneRm } ?: 0.0,
         volume = working.maxOfOrNull { it.volumeKg } ?: 0.0,
-        reps = working.maxOfOrNull { it.reps ?: 0 } ?: 0,
+        reps = working.maxOfOrNull { it.straightReps } ?: 0,
         seconds = working.maxOfOrNull { it.seconds ?: 0 } ?: 0,
         distance = working.maxOfOrNull { it.distanceKm ?: 0.0 } ?: 0.0,
     )
 }
 
 /**
- * Marks the single best done set per record type when it beats [previous]. With no history at
+ * Marks the single best done set per record type when it beats [previous]. Rep and 1RM records go
+ * by reps before any rest-pause; volume counts them all. With no history at
  * all there is nothing to beat, so a first-ever session sets no records.
  */
 fun computePrMasks(sets: List<SessionSet>, tracking: TrackingType, previous: Bests?, hasHistory: Boolean): List<SessionSet> {
@@ -266,10 +268,10 @@ fun computePrMasks(sets: List<SessionSet>, tracking: TrackingType, previous: Bes
         when (tracking) {
             TrackingType.WEIGHT_REPS -> {
                 mark(Pr.WEIGHT, { if ((it.reps ?: 0) > 0) it.weightKg ?: 0.0 else 0.0 }, previous.weight)
-                mark(Pr.ONE_RM, { estimatedOneRepMax(it.weightKg ?: 0.0, it.reps ?: 0) }, previous.oneRm)
+                mark(Pr.ONE_RM, { estimatedOneRepMax(it.weightKg ?: 0.0, it.straightReps ?: 0) }, previous.oneRm)
                 mark(Pr.VOLUME, { (it.weightKg ?: 0.0) * (it.reps ?: 0) }, previous.volume)
             }
-            TrackingType.REPS -> mark(Pr.REPS, { (it.reps ?: 0).toDouble() }, previous.reps.toDouble())
+            TrackingType.REPS -> mark(Pr.REPS, { (it.straightReps ?: 0).toDouble() }, previous.reps.toDouble())
             TrackingType.DURATION -> mark(Pr.DURATION, { (it.seconds ?: 0).toDouble() }, previous.seconds.toDouble())
             TrackingType.DISTANCE_DURATION -> mark(Pr.DISTANCE, { it.distanceKm ?: 0.0 }, previous.distance)
         }
@@ -292,7 +294,10 @@ fun recomputePrMasks(rows: List<SetWithWorkout>, tracking: TrackingType): List<S
             workout.map { it.set }.groupBy { it.exerciseIndex }.toSortedMap().values.forEach { group ->
                 val sets = group.sortedBy { it.setIndex }
                 val session = sets.map {
-                    SessionSet(key = it.id, type = it.type, weightKg = it.weightKg, reps = it.reps, seconds = it.seconds, distanceKm = it.distanceKm, done = true)
+                    SessionSet(
+                        key = it.id, type = it.type, weightKg = it.weightKg, reps = it.reps, seconds = it.seconds, distanceKm = it.distanceKm,
+                        done = true, pauseReps = it.pauseReps,
+                    )
                 }
                 computePrMasks(session, tracking, bests, bests != null).zip(sets).forEach { (marked, s) ->
                     if (marked.prMask != s.prMask) changed += s.copy(prMask = marked.prMask)
@@ -308,9 +313,9 @@ private fun Bests.with(sets: List<SessionSet>): Bests {
     val working = sets.filter { it.done && counts(it.type) }
     return Bests(
         weight = maxOf(weight, working.filter { (it.reps ?: 0) > 0 }.maxOfOrNull { it.weightKg ?: 0.0 } ?: 0.0),
-        oneRm = maxOf(oneRm, working.maxOfOrNull { estimatedOneRepMax(it.weightKg ?: 0.0, it.reps ?: 0) } ?: 0.0),
+        oneRm = maxOf(oneRm, working.maxOfOrNull { estimatedOneRepMax(it.weightKg ?: 0.0, it.straightReps ?: 0) } ?: 0.0),
         volume = maxOf(volume, working.maxOfOrNull { (it.weightKg ?: 0.0) * (it.reps ?: 0) } ?: 0.0),
-        reps = maxOf(reps, working.maxOfOrNull { it.reps ?: 0 } ?: 0),
+        reps = maxOf(reps, working.maxOfOrNull { it.straightReps ?: 0 } ?: 0),
         seconds = seconds, distance = distance,
     )
 }
@@ -326,7 +331,7 @@ fun recordChance(ex: SessionExercise, index: Int, hint: SessionSet?, tracking: T
     val set = ex.sets[index]
     if (set.done || !counts(set.type) || bests == null) return null
     val b = bests.with(ex.sets)
-    val reps = set.reps ?: hint?.reps ?: return null
+    val reps = set.straightReps ?: hint?.reps ?: return null
     if (reps <= 0) return null
     val w = set.weightKg ?: hint?.weightKg ?: 0.0
     fun beats(r: Int) = when (tracking) {
@@ -340,6 +345,57 @@ fun recordChance(ex: SessionExercise, index: Int, hint: SessionSet?, tracking: T
         else -> null
     }
 }
+
+// ---- Rest-pause ----
+
+/** Whether a set's reps can be split by rest-pauses: rep-counted working sets. */
+fun canRestPause(set: SessionSet, tracking: TrackingType) =
+    set.type != SetType.WARMUP && (tracking == TrackingType.WEIGHT_REPS || tracking == TrackingType.REPS)
+
+/**
+ * The reps working sets aim for, to offer finishing a short one with a rest-pause: the most that
+ * any of them suggests through [suggest]. A later set's own suggestion is often lower (last
+ * time's tailed off, or there was no such set and it copies the one above), but you're still
+ * going for the same reps.
+ */
+fun pauseGoal(ex: SessionExercise, suggest: (Int) -> SessionSet?): Int? =
+    ex.sets.indices.filter { ex.sets[it].type.isWorking() }.mapNotNull { suggest(it)?.reps }.maxOrNull()
+
+/** Whether a ticked set should offer finishing it with a rest-pause: a working set short of [goal]. */
+fun offersPause(set: SessionSet, goal: Int?): Boolean =
+    set.done && set.type.isWorking() && set.pauseReps.isEmpty() && goal != null && (set.reps ?: 0) in 1 until goal
+
+/**
+ * Adds a rest-pause after the set's last mini-set, starting at the reps still needed to reach
+ * [goal] (what the set was aiming for), else one.
+ */
+fun SessionSet.addPause(goal: Int?): SessionSet {
+    val done = reps ?: 0
+    val next = goal?.let { it - done }?.takeIf { it > 0 } ?: 1
+    return copy(reps = done + next, pauseReps = pauseReps + next)
+}
+
+/** Sets the [index]th rest-pause's reps, or removes it when [value] is below one. */
+fun SessionSet.setPause(index: Int, value: Int): SessionSet {
+    val old = pauseReps.getOrNull(index) ?: return this
+    val pauses = if (value < 1) pauseReps.filterIndexed { i, _ -> i != index } else pauseReps.toMutableList().also { it[index] = value }
+    return copy(reps = reps?.let { it - old + value.coerceAtLeast(0) }, pauseReps = pauses)
+}
+
+/** Sets the reps before the first rest-pause, keeping the ones after it. */
+fun SessionSet.withStraightReps(value: Int?): SessionSet =
+    copy(reps = value?.let { it + pauseReps.sum() })
+
+/**
+ * Done sets that finished, with no rest-pause, the reps that needed one last time at the same
+ * weight or less: the goal of rest-pausing. Paired by the same set from last time.
+ */
+fun pauseFreeWins(ex: SessionExercise, previous: List<SetEntity>?): List<SessionSet> =
+    ex.sets.filterIndexed { i, set ->
+        if (!set.done || set.pauseReps.isNotEmpty() || set.type == SetType.WARMUP) return@filterIndexed false
+        val prev = previousFor(ex, i, previous) ?: return@filterIndexed false
+        prev.pauseReps.isNotEmpty() && (set.reps ?: 0) >= (prev.reps ?: 0) && (set.weightKg ?: 0.0) >= (prev.weightKg ?: 0.0) - 1e-9
+    }
 
 // ---- Typos ----
 

@@ -37,6 +37,8 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.StickyNote2
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Pause
@@ -150,6 +152,65 @@ import app.stronger.ui.formatWeight
 import app.stronger.ui.toKg
 import kotlin.math.roundToInt
 
+private fun joinNotes(a: String, b: String) = listOf(a, b).filter { it.isNotBlank() }.joinToString("\n")
+
+/**
+ * A note under the exercise name; swipe left to delete. The pin moves it between this workout
+ * only and sticky (on the exercise, so it shows every time); null [onTogglePin] hides the pin.
+ */
+@Composable
+private fun NoteField(text: String, sticky: Boolean, onChange: (String) -> Unit, onDelete: () -> Unit, onTogglePin: (() -> Unit)?) {
+    // Leaves composition on dismiss, so a re-added note gets a fresh swipe state.
+    val dismiss = rememberSwipeToDismissBoxState()
+    val container = if (sticky) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.tertiaryContainer
+    val content = if (sticky) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
+    SwipeToDismissBox(
+        state = dismiss,
+        enableDismissFromStartToEnd = false,
+        onDismiss = { onDelete() },
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+        backgroundContent = {
+            Box(
+                Modifier.fillMaxWidth().fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 16.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) { Icon(Icons.Filled.Delete, "Delete note", tint = MaterialTheme.colorScheme.onErrorContainer) }
+        },
+    ) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(container),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicTextField(
+                value = text,
+                onValueChange = onChange,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = content),
+                cursorBrush = SolidColor(if (sticky) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                modifier = Modifier.weight(1f),
+                decorationBox = { inner ->
+                    Box(Modifier.fillMaxWidth().padding(start = 12.dp, end = if (onTogglePin == null) 12.dp else 0.dp, top = 8.dp, bottom = 8.dp)) {
+                        if (text.isEmpty()) Text(
+                            if (sticky) "Sticky note, shown every time" else "Note for this workout",
+                            style = MaterialTheme.typography.bodyMedium, color = content.copy(alpha = 0.6f),
+                        )
+                        inner()
+                    }
+                },
+            )
+            if (onTogglePin != null) {
+                IconButton(onClick = onTogglePin, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        if (sticky) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                        if (sticky) "Make this note for this workout only" else "Make this note sticky",
+                        Modifier.size(18.dp), tint = content.copy(alpha = if (sticky) 1f else 0.6f),
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ExerciseBlock(
     ex: SessionExercise,
@@ -169,6 +230,8 @@ fun ExerciseBlock(
     onToggleSet: (exKey: Long, setKey: Long) -> Unit,
     modifier: Modifier = Modifier,
     onTimeSet: (exKey: Long, setKey: Long) -> Unit = { _, _ -> },
+    /** Saves the exercise's sticky note, which shows in every workout; null where there is none (templates). */
+    onStickyNote: ((String) -> Unit)? = null,
     /** Adds a rest-pause aiming for [goal] reps; live workouts also restart the rest from it. */
     onAddPause: (exKey: Long, setKey: Long, goal: Int?) -> Unit = { e, st, goal -> store.update { it.updateSet(e, st) { x -> x.addPause(goal) } } },
 ) {
@@ -176,6 +239,9 @@ fun ExerciseBlock(
     val tracking = info?.tracking ?: TrackingType.WEIGHT_REPS
     var menu by remember { mutableStateOf(false) }
     var editingNote by remember { mutableStateOf(false) }
+    var editingSticky by remember { mutableStateOf(false) }
+    // Typed locally and saved as it changes, so the database echo can't move the cursor.
+    var sticky by remember(info?.id) { mutableStateOf(info?.notes.orEmpty()) }
     var restSheet by remember { mutableStateOf(false) }
     var supersetPicker by remember { mutableStateOf(false) }
     var plates by remember { mutableStateOf(false) }
@@ -256,6 +322,11 @@ fun ExerciseBlock(
                                 leadingIcon = { Icon(Icons.Outlined.StickyNote2, null) },
                                 onClick = { menu = false; editingNote = true },
                             )
+                            if (onStickyNote != null) DropdownMenuItem(
+                                text = { Text(if (sticky.isEmpty()) "Add sticky note" else "Edit sticky note") },
+                                leadingIcon = { Icon(Icons.Outlined.PushPin, null) },
+                                onClick = { menu = false; editingSticky = true },
+                            )
                             if (session.exercises.size > 1) {
                                 if (superset) {
                                     DropdownMenuItem(
@@ -302,43 +373,32 @@ fun ExerciseBlock(
                         }
                     }
                 }
+                if (onStickyNote != null && (sticky.isNotEmpty() || editingSticky)) {
+                    NoteField(
+                        text = sticky, sticky = true,
+                        onChange = { v -> sticky = v; onStickyNote(v) },
+                        onDelete = { editingSticky = false; sticky = ""; onStickyNote("") },
+                        onTogglePin = {
+                            store.update { it.updateExercise(ex.key) { e -> e.copy(note = joinNotes(e.note, sticky)) } }
+                            sticky = ""; onStickyNote("")
+                            editingSticky = false; editingNote = true
+                        },
+                    )
+                }
                 if (ex.note.isNotEmpty() || editingNote) {
-                    // Leaves composition on dismiss, so a re-added note gets a fresh swipe state.
-                    val noteDismiss = rememberSwipeToDismissBoxState()
-                    SwipeToDismissBox(
-                        state = noteDismiss,
-                        enableDismissFromStartToEnd = false,
-                        onDismiss = {
+                    NoteField(
+                        text = ex.note, sticky = false,
+                        onChange = { v -> store.update { it.updateExercise(ex.key) { e -> e.copy(note = v) } } },
+                        onDelete = {
                             editingNote = false
                             store.update { it.updateExercise(ex.key) { e -> e.copy(note = "") } }
                         },
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-                        backgroundContent = {
-                            Box(
-                                Modifier.fillMaxWidth().fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.errorContainer)
-                                    .padding(horizontal = 16.dp),
-                                contentAlignment = Alignment.CenterEnd,
-                            ) { Icon(Icons.Filled.Delete, "Delete note", tint = MaterialTheme.colorScheme.onErrorContainer) }
-                        },
-                    ) {
-                        BasicTextField(
-                            value = ex.note,
-                            onValueChange = { v -> store.update { it.updateExercise(ex.key) { e -> e.copy(note = v) } } },
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onTertiaryContainer),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.tertiary),
-                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                            modifier = Modifier.fillMaxWidth(),
-                            decorationBox = { inner ->
-                                Box(
-                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.tertiaryContainer)
-                                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                                ) {
-                                    if (ex.note.isEmpty()) Text("Note for this exercise", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.6f))
-                                    inner()
-                                }
-                            },
-                        )
-                    }
+                        onTogglePin = if (onStickyNote == null) null else ({
+                            sticky = joinNotes(sticky, ex.note); onStickyNote(sticky)
+                            store.update { it.updateExercise(ex.key) { e -> e.copy(note = "") } }
+                            editingNote = false; editingSticky = true
+                        }),
+                    )
                 }
                 ColumnHeaders(tracking, info?.equipment, settings, live)
                 var normalCount = 0

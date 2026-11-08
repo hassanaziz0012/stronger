@@ -311,6 +311,9 @@ fun SessionEditorScreen(
                             if (session.setTimer?.setKey == st) c.active.cancelSetTimer() else c.active.startSetTimer(e, st)
                         },
                         onAddPause = if (live) c.active::addPause else { e, st, goal -> store.update { it.updateSet(e, st) { x -> x.addPause(goal) } } },
+                        onStickyNote = if (mode is EditorMode.Template || info == null) null else { v ->
+                            scope.launch { c.repo.getExercise(info.id)?.let { c.repo.updateExercise(it.copy(notes = v.trim())) } }
+                        },
                     )
                 }
                 item(key = "footer") {

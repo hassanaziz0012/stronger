@@ -282,7 +282,7 @@ fun ExerciseEditorSheet(
             }
             VSpace(16.dp)
             OutlinedTextField(
-                value = notes, onValueChange = { notes = it }, label = { Text("Notes (optional)") },
+                value = notes, onValueChange = { notes = it }, label = { Text("Sticky note (optional)") }, supportingText = { Text("Shows on this exercise in every workout") },
                 minLines = 2, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, keyboardType = KeyboardType.Text),
             )

@@ -17,7 +17,7 @@ A workout tracker for Android in the spirit of Strong, built with Jetpack Compos
 - "Previous" column with last time's matching set (warm-ups pair with warm-ups). Tap it to copy; blank fields are filled from it when you tick the set.
 - Set types: warm-up, drop set, failure. Swipe a set left to delete it.
 - Rest timer starts automatically when you complete a set (per-exercise or default rest, off per exercise). ±15 s and skip in-app and from the notification.
-- Supersets (rest starts after the last exercise in the round), exercise notes, reorder, replace, remove.
+- Supersets (rest starts after the last exercise in the round), exercise notes (one-time for this workout, or sticky so they show every time; past notes appear in the exercise history), reorder, replace, remove.
 - Live PR detection: a trophy appears on the set the moment you beat a record. Before you lift, an outlined trophy marks sets whose numbers would set one, and "+1 rep" marks sets one rep short of one.
 - Typo check: finishing with a set far beyond your best (225 kg for 22.5, 100 reps for 10) asks whether it's right before it becomes an unbeatable record. Editing or deleting an old workout re-awards trophies on the workouts after it.
 - Estimated finish time ("done ~7:40 PM") from your usual pace per set, in the workout header and notification.

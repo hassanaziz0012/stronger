@@ -1,5 +1,8 @@
 package app.stronger.ui.exercises
 
+import androidx.compose.material.icons.outlined.StickyNote2
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -499,6 +502,16 @@ private fun HistoryTab(e: ExerciseEntity, sessions: List<ExerciseSession>, setti
                 Column(Modifier.padding(16.dp).fillMaxWidth()) {
                     Text(s.name, style = MaterialTheme.typography.titleMediumEmphasized)
                     Text(s.startedAt.formatDate("EEE, MMM d, yyyy"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    s.sets.first().exerciseNote.takeIf { it.isNotBlank() }?.let { note ->
+                        VSpace(8.dp)
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.tertiaryContainer)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Icon(Icons.Outlined.StickyNote2, null, Modifier.padding(end = 8.dp).size(18.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
+                            Text(note, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                        }
+                    }
                     VSpace(8.dp)
                     var n = 0
                     s.sets.forEach { set ->

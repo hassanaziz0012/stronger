@@ -1,5 +1,9 @@
 package app.stronger.ui.components
 
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -157,3 +161,19 @@ fun HSpace(w: Dp) = Spacer(Modifier.width(w))
 
 @Composable
 fun VSpace(h: Dp) = Spacer(Modifier.height(h))
+
+/** Marks an exercise whose last session met every goal, with [detail] saying what to do about it. */
+@Composable
+fun ReadyBadge(detail: String?, modifier: Modifier = Modifier) {
+    Row(
+        modifier.background(MaterialTheme.colorScheme.tertiaryContainer, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.AutoMirrored.Filled.TrendingUp, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
+        Text(
+            " Ready to progress" + (detail?.let { " · $it" } ?: ""),
+            style = MaterialTheme.typography.labelLargeEmphasized, color = MaterialTheme.colorScheme.onTertiaryContainer,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}

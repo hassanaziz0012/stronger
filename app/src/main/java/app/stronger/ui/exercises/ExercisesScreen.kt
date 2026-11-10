@@ -1,5 +1,7 @@
 package app.stronger.ui.exercises
 
+import app.stronger.ui.components.ReadyBadge
+import app.stronger.data.readyToProgress
 import androidx.compose.material.icons.outlined.StickyNote2
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
@@ -458,6 +460,19 @@ private fun ProgressCard(e: ExerciseEntity, sessions: List<ExerciseSession>, set
                 Text(headline, style = MaterialTheme.typography.titleSmallEmphasized, color = color)
             }
             Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (remember(sessions, e, unit) { readyToProgress(sessions.firstOrNull()?.sets, e, unit) }) {
+                VSpace(12.dp)
+                ReadyBadge(null)
+                Text(
+                    when {
+                        e.tracking == TrackingType.DURATION -> "You hit every goal last session. Aim longer next time, or move to a harder variation."
+                        e.tracking == TrackingType.REPS -> "You hit every goal last session. Add reps or load next time, or move to a harder variation."
+                        else -> "You hit every goal last session. Go heavier next time."
+                    },
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
             if (canTarget) {
                 VSpace(16.dp)
                 Row(verticalAlignment = Alignment.CenterVertically) {

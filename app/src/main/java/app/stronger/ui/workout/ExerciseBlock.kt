@@ -1,5 +1,7 @@
 package app.stronger.ui.workout
 
+import app.stronger.ui.components.ReadyBadge
+import app.stronger.data.readyNextTime
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -287,7 +289,6 @@ fun ExerciseBlock(
                             maxLines = 2, overflow = TextOverflow.Ellipsis,
                         )
                         if (repTarget != null && mode !is EditorMode.History) {
-                            val ready = live && readyToProgress(previous, repTarget)
                             Row(
                                 Modifier.padding(top = 2.dp).clip(RoundedCornerShape(8.dp)).clickable { targets = true },
                                 verticalAlignment = Alignment.CenterVertically,
@@ -297,15 +298,22 @@ fun ExerciseBlock(
                                     " ${repTarget.min}–${repTarget.max} reps",
                                     style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                if (ready) Text(
-                                    when {
-                                        tracking == TrackingType.REPS -> " · top of range, go harder"
-                                        info?.equipment == Equipment.ASSISTED_BODYWEIGHT -> " · less assistance today"
-                                        else -> " · +${formatWeight(repTarget.incrementKg, settings.unit)} ${settings.unit.label} today"
-                                    },
-                                    style = MaterialTheme.typography.labelLargeEmphasized, color = MaterialTheme.colorScheme.tertiary,
-                                )
                             }
+                        }
+                        if (live) {
+                            // Today's sets decide once they're all ticked; until then it's last time's.
+                            val finished = ex.sets.any { it.type == SetType.NORMAL || it.type == SetType.FAILURE } &&
+                                ex.sets.none { !it.done && (it.type == SetType.NORMAL || it.type == SetType.FAILURE) }
+                            val detail = when {
+                                finished -> "next time".takeIf { readyNextTime(ex, info, settings.unit) }
+                                !readyToProgress(previous, info, settings.unit, planned = ex.sets) -> null
+                                tracking == TrackingType.DURATION -> "go longer or harder"
+                                tracking == TrackingType.REPS -> "add reps or load"
+                                info?.equipment == Equipment.ASSISTED_BODYWEIGHT -> "less assistance"
+                                repTarget != null -> "+${formatWeight(repTarget.incrementKg, settings.unit)} ${settings.unit.label}"
+                                else -> "add weight"
+                            }
+                            if (detail != null) ReadyBadge(detail, Modifier.padding(top = 4.dp))
                         }
                     }
                     if (mode !is EditorMode.History) {

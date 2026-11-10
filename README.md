@@ -8,7 +8,7 @@ A workout tracker for Android in the spirit of Strong, built with Jetpack Compos
 - Start an empty workout or one from a template; resume a workout in progress from anywhere, even after the app is killed.
 - Weekly goal ring, a 7-day strip and a week streak.
 - One reminder, half an hour before you usually train, only on days when skipping would break your weekly goal or week streak.
-- "Up next": the template your rotation says comes next is listed first. Template cards show how long each usually takes.
+- "Up next": the template your rotation says comes next is listed first, and the info button beside "Templates" explains how that's worked out. Template cards show how long each usually takes.
 - A recap of last month (workouts, time, volume, records, biggest est. 1RM gains, body-weight change) for the first week of each month.
 - Templates: create, edit, duplicate, delete, preview before starting. Save any past workout as a template, or update a template with today's sets when you finish.
 
@@ -24,6 +24,8 @@ A workout tracker for Android in the spirit of Strong, built with Jetpack Compos
 - Forgot to finish? After an hour with no set ticked you get a "Still training?" notification, and a workout finished more than 30 minutes after its last set ends one rest after that set.
 - Effort: after ticking a working set, a "Reps left?" row asks for reps in reserve (0–4+), with a guess from your best est. 1RM marked "~". Only tapped answers are saved; change them from the set-number menu, or turn the question off in Settings. Easy sets (3+ in reserve) make targets jump twice as far, and effort counts towards plateau detection, so a lift that's getting harder shows up before the numbers drop. Strong's RPE column imports as RIR.
 - Rep targets (double progression): give an exercise a rep range and each working set suggests last time's weight with one more rep; once every set reaches the top, the weight goes up (2.5 kg / 5 lb by default, or your own step) and reps reset. Assisted exercises take assistance off instead. Targets replace stale template numbers.
+- "Ready to progress" badge: an exercise earns it when every working set meets its goal (the top of the rep range, the reps a template started the set with, or the time a duration set's timer ran to), and keeps it until a session falls short again, which the first heavier or longer one usually does.
+- Set timer for duration sets: counts up to the time typed into the set (else last time's), with a tick and a short buzz where last time ended.
 - Ongoing notification, promoted to an Android 16 Live Update, with rest progress, "up next", ±15 s, skip and "Complete set". Vibration and sound when rest is over; the sound ducks music instead of pausing it.
 - Keeps the screen on while a workout is open (setting).
 - Finishing shows a celebration screen with duration, volume, sets and new records.

@@ -1,5 +1,8 @@
 package app.stronger.ui.workout
 
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithContent
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -539,13 +542,28 @@ private fun SetTimerToolbar(timer: SetTimer, now: Long, title: String) {
                 }
             }
             if (target != null) {
+                val milestone = timer.milestoneSeconds
+                val mark = MaterialTheme.colorScheme.onTertiaryContainer
                 LinearWavyProgressIndicator(
                     progress = { (seconds.toFloat() / target).coerceIn(0f, 1f) },
                     color = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).size(width = 260.dp, height = 10.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).size(width = 260.dp, height = 10.dp)
+                        // A tick where last time ended.
+                        .drawWithContent {
+                            drawContent()
+                            if (milestone != null) {
+                                val x = size.width * milestone / target
+                                drawLine(mark, Offset(x, -3.dp.toPx()), Offset(x, size.height + 3.dp.toPx()), 3.dp.toPx(), StrokeCap.Round)
+                            }
+                        },
                 )
                 Text(
-                    if (seconds < target) "Goal ${formatClock(target.toLong())}" else "Goal hit · +${formatClock(seconds - target)}",
+                    when {
+                        seconds >= target -> "Goal hit · +${formatClock(seconds - target)}"
+                        milestone == null -> "Goal ${formatClock(target.toLong())}"
+                        seconds >= milestone -> "Past last time's ${formatClock(milestone.toLong())} · goal ${formatClock(target.toLong())}"
+                        else -> "Last time ${formatClock(milestone.toLong())} · goal ${formatClock(target.toLong())}"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                 )
             }

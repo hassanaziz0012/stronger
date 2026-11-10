@@ -101,7 +101,7 @@ class WorkoutService : Service() {
         }
     }
 
-    /** Alerts when the get-ready countdown ends, so you know to start, and again at the set's goal. */
+    /** Alerts when the get-ready countdown ends, so you know to start, and again at the set's goal, with a buzz at the milestone between. */
     private suspend fun watchSetTimer(timer: SetTimer) {
         if (timer.paused) return
         val goAt = timer.startedAt
@@ -111,6 +111,12 @@ class WorkoutService : Service() {
             active.session.value?.let { nm.notify(ONGOING_ID, build(it)) }
         }
         val target = timer.targetSeconds ?: return
+        // A short buzz on passing last time's mark; the full alert is kept for the goal.
+        val milestoneAt = timer.milestoneSeconds?.let { goAt + it * 1000L }
+        if (milestoneAt != null && milestoneAt > System.currentTimeMillis()) {
+            delay(milestoneAt - System.currentTimeMillis())
+            if (container.settings.current().timerVibrate) vibrate(longArrayOf(0, 120))
+        }
         val goalAt = goAt + target * 1000L
         // A goal passed before this started watching (e.g. after a pause) was already announced.
         if (goalAt <= System.currentTimeMillis()) return

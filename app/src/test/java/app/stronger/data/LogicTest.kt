@@ -184,4 +184,48 @@ class LogicTest {
         assertTrue(!offersPause(ex.sets[2], goal))
         assertTrue(!offersPause(ex.sets[0].addPause(12), goal))
     }
+
+    @Test
+    fun goalsMetMakeAnExerciseReadyToProgress() {
+        fun info(e: Equipment) = ExerciseEntity(id = 1, name = "x", bodyPart = BodyPart.CHEST, equipment = e)
+        fun set(goal: Int?, reps: Int? = null, seconds: Int? = null, type: SetType = SetType.NORMAL, kg: Double? = null, goalKg: Double? = null) =
+            SetEntity(workoutId = 1, exerciseId = 1, exerciseIndex = 0, setIndex = 0, type = type, reps = reps, seconds = seconds, goal = goal, weightKg = kg, goalKg = goalKg)
+        val plank = info(Equipment.DURATION)
+        assertTrue(readyToProgress(listOf(set(60, seconds = 60), set(60, seconds = 75)), plank, WeightUnit.KG))
+        assertTrue(!readyToProgress(listOf(set(60, seconds = 60), set(60, seconds = 50)), plank, WeightUnit.KG))
+        // Sets that aimed for nothing neither count nor block; with no goals at all there's nothing to go by.
+        assertTrue(readyToProgress(listOf(set(60, seconds = 60), set(null, seconds = 20)), plank, WeightUnit.KG))
+        assertTrue(!readyToProgress(listOf(set(null, seconds = 60)), plank, WeightUnit.KG))
+        val curl = info(Equipment.DUMBBELL)
+        assertTrue(readyToProgress(listOf(set(10, reps = 10), set(10, reps = 11), set(5, reps = 3, type = SetType.WARMUP)), curl, WeightUnit.KG))
+        assertTrue(!readyToProgress(listOf(set(10, reps = 10), set(10, reps = 8)), curl, WeightUnit.KG))
+        // The reps only count at the weight they were meant for.
+        assertTrue(readyToProgress(listOf(set(10, reps = 10, kg = 30.0, goalKg = 30.0)), curl, WeightUnit.KG))
+        assertTrue(!readyToProgress(listOf(set(10, reps = 10, kg = 25.0, goalKg = 30.0)), curl, WeightUnit.KG))
+        val assisted = info(Equipment.ASSISTED_BODYWEIGHT)
+        assertTrue(readyToProgress(listOf(set(10, reps = 10, kg = 15.0, goalKg = 20.0)), assisted, WeightUnit.KG))
+        assertTrue(!readyToProgress(listOf(set(10, reps = 10, kg = 25.0, goalKg = 20.0)), assisted, WeightUnit.KG))
+        // Workouts from before goals were recorded are held against today's plan.
+        val plan = listOf(SessionSet(key = 1, goal = 10, goalKg = 30.0), SessionSet(key = 2, goal = 10, goalKg = 30.0))
+        val old = listOf(set(null, reps = 10, kg = 30.0), set(null, reps = 10, kg = 30.0))
+        assertTrue(readyToProgress(old, curl, WeightUnit.KG, plan))
+        assertTrue(!readyToProgress(old.dropLast(1) + set(null, reps = 9, kg = 30.0), curl, WeightUnit.KG, plan))
+        assertTrue(!readyToProgress(old, curl, WeightUnit.KG))
+
+        val live = SessionExercise(key = 1, exerciseId = 1, sets = listOf(
+            SessionSet(key = 1, seconds = 61, done = true, goal = 60), SessionSet(key = 2, seconds = 60, goal = 60),
+        ))
+        assertTrue(!readyNextTime(live, plank, WeightUnit.KG))
+        assertTrue(readyNextTime(live.copy(sets = live.sets.map { it.copy(done = true) }), plank, WeightUnit.KG))
+    }
+
+    @Test
+    fun startingAWorkoutRecordsWhatEachSetAimsFor() {
+        val s = Session(name = "w", exercises = listOf(
+            SessionExercise(key = 1, exerciseId = 1, sets = listOf(SessionSet(key = 1, weightKg = 50.0, reps = 10), SessionSet(key = 2))),
+            SessionExercise(key = 2, exerciseId = 2, sets = listOf(SessionSet(key = 3, seconds = 90))),
+        )).withGoals { if (it == 1L) TrackingType.WEIGHT_REPS else TrackingType.DURATION }
+        assertEquals(listOf(10, null, 90), s.exercises.flatMap { it.sets }.map { it.goal })
+        assertEquals(listOf(50.0, null, null), s.exercises.flatMap { it.sets }.map { it.goalKg })
+    }
 }

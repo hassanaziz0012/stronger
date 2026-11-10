@@ -71,7 +71,7 @@ fun Session.removeSet(exKey: Long, setKey: Long) =
 
 /** A template keeps targets but never completion state. */
 fun Session.asTemplateExercises() = exercises.map { ex ->
-    ex.copy(sets = ex.sets.map { it.copy(done = false, prMask = 0, rir = null, doneAt = null, pauseReps = emptyList()) })
+    ex.copy(sets = ex.sets.map { it.copy(done = false, prMask = 0, rir = null, doneAt = null, pauseReps = emptyList(), goal = null, goalKg = null) })
 }
 
 /** Starts a workout from template exercises with fresh keys. */
@@ -133,6 +133,73 @@ fun readyToProgress(previous: List<SetEntity>?, target: RepTarget): Boolean {
     val working = previous.orEmpty().filter { it.type.isWorking() }
     return working.isNotEmpty() && working.all { it.straightReps >= target.max }
 }
+
+/** What a working set aimed for and what it got: reps (or seconds), and the weight they were at. */
+private data class Attempt(val goal: Int?, val got: Int, val goalKg: Double? = null, val gotKg: Double? = null)
+
+private fun SetEntity.attempt(t: TrackingType) =
+    if (t == TrackingType.DURATION) Attempt(goal, seconds ?: 0) else Attempt(goal, straightReps, goalKg, weightKg)
+
+private fun SessionSet.attempt(t: TrackingType) =
+    if (t == TrackingType.DURATION) Attempt(goal, seconds ?: 0) else Attempt(goal, straightReps ?: 0, goalKg, weightKg)
+
+/**
+ * True when every working set that aimed for something got there, at the weight it aimed for or
+ * heavier (lighter, when [assisted]: the weight is help).
+ */
+private fun metGoals(attempts: List<Attempt>, assisted: Boolean): Boolean {
+    val aimed = attempts.filter { it.goal != null }
+    return aimed.isNotEmpty() && aimed.all { a ->
+        val kg = a.gotKg ?: 0.0
+        val heavyEnough = a.goalKg == null || if (assisted) kg <= a.goalKg + 1e-6 else kg >= a.goalKg - 1e-6
+        a.got >= a.goal!! && heavyEnough
+    }
+}
+
+private fun ExerciseEntity.goalTracked() = tracking != TrackingType.DISTANCE_DURATION
+
+/**
+ * Whether last time earned a step up: every working set reached the top of the rep range or,
+ * without a range, the goal it set out with (see [SessionSet.goal]). Stays true until a session
+ * falls short again, which the first one at a heavier weight or longer goal usually does.
+ *
+ * Workouts logged before goals were recorded have none; for those, last time is held against what
+ * [planned] (today's sets, as the template filled them) aims for, set by set.
+ */
+fun readyToProgress(previous: List<SetEntity>?, info: ExerciseEntity?, unit: WeightUnit, planned: List<SessionSet>? = null): Boolean {
+    if (info == null || !info.goalTracked()) return false
+    info.repTarget(unit)?.let { return readyToProgress(previous, it) }
+    val working = previous.orEmpty().filter { it.type.isWorking() }
+    val assisted = info.equipment == Equipment.ASSISTED_BODYWEIGHT
+    if (working.any { it.goal != null } || planned == null) return metGoals(working.map { it.attempt(info.tracking) }, assisted)
+    val plan = planned.filter { it.type.isWorking() }
+    return working.size >= plan.size && metGoals(
+        working.zip(plan) { done, aim -> done.copy(goal = aim.goal, goalKg = aim.goalKg).attempt(info.tracking) }, assisted,
+    )
+}
+
+/** [readyToProgress] for the workout in progress, once every working set of the exercise is ticked. */
+fun readyNextTime(ex: SessionExercise, info: ExerciseEntity?, unit: WeightUnit): Boolean {
+    if (info == null || !info.goalTracked()) return false
+    val working = ex.sets.filter { it.type.isWorking() }
+    if (working.isEmpty() || working.any { !it.done }) return false
+    info.repTarget(unit)?.let { target -> return working.all { (it.straightReps ?: 0) >= target.max } }
+    return metGoals(working.map { it.attempt(info.tracking) }, info.equipment == Equipment.ASSISTED_BODYWEIGHT)
+}
+
+/** Records what each unticked set starts the workout aiming for, from the numbers already in it. */
+fun Session.withGoals(tracking: (Long) -> TrackingType?): Session = copy(exercises = exercises.map { ex ->
+    val t = tracking(ex.exerciseId)
+    ex.copy(sets = ex.sets.map { set ->
+        if (set.done || set.goal != null) return@map set
+        val goal = when (t) {
+            TrackingType.WEIGHT_REPS, TrackingType.REPS -> set.reps
+            TrackingType.DURATION -> set.seconds
+            else -> null
+        }?.takeIf { it > 0 }
+        set.copy(goal = goal, goalKg = set.weightKg.takeIf { goal != null && t == TrackingType.WEIGHT_REPS })
+    })
+})
 
 /** Reported this many reps in reserve or more on every working set: it was easy, so progress faster. */
 private const val EASY_RIR = 3

@@ -143,6 +143,7 @@ class Repository(private val db: AppDatabase, val settings: SettingsStore, priva
                     SessionSet(
                         key = Keys.next(), type = it.type, weightKg = it.weightKg, reps = it.reps,
                         seconds = it.seconds, distanceKm = it.distanceKm, done = true, prMask = it.prMask, rir = it.rir, pauseReps = it.pauseReps,
+                        goal = it.goal, goalKg = it.goalKg,
                     )
                 },
             )
@@ -163,7 +164,7 @@ class Repository(private val db: AppDatabase, val settings: SettingsStore, priva
                     workoutId = workoutId, exerciseId = ex.exerciseId, exerciseIndex = exIndex, setIndex = setIndex,
                     type = s.type, weightKg = s.weightKg, reps = s.reps, seconds = s.seconds, distanceKm = s.distanceKm,
                     prMask = s.prMask, supersetId = ex.supersetId, exerciseNote = ex.note, restSeconds = ex.restSeconds,
-                    rir = s.rir, pauseReps = s.pauseReps,
+                    rir = s.rir, pauseReps = s.pauseReps, goal = s.goal, goalKg = s.goalKg,
                 )
             }
         }

@@ -63,7 +63,7 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
     fun start(session: Session) {
         _session.value = session
         persist(session)
-        refreshHistory(session, fromTemplate = session.templateId != null)
+        refreshHistory(session, starting = true)
     }
 
     override fun update(f: (Session) -> Session) {
@@ -93,7 +93,8 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
         })
     }
 
-    private fun refreshHistory(s: Session, fromTemplate: Boolean = false) {
+    private fun refreshHistory(s: Session, starting: Boolean = false) {
+        val fromTemplate = starting && s.templateId != null
         scope.launch {
             val ids = s.exercises.map { it.exerciseId }.distinct()
             ids.forEach { id -> if (id !in _exercises) repo.getExercise(id)?.let { _exercises[id] = it } }
@@ -105,9 +106,10 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
             _pace.value = millisPerSet(workouts.filter { it.startedAt < s.startedAt }, setCounts, s.templateId, templateName)
             _session.update { current ->
                 val targeted = { id: Long -> _exercises[id]?.repTarget(unit) != null && !previous[id].isNullOrEmpty() }
-                current?.let { if (fromTemplate) it.clearForTargets(s, targeted) else it }?.let(::withPrs)
+                current?.let { if (starting) it.withGoals { id -> _exercises[id]?.tracking } else it }
+                    ?.let { if (fromTemplate) it.clearForTargets(s, targeted) else it }?.let(::withPrs)
             }
-            if (fromTemplate) persist(_session.value)
+            if (starting) persist(_session.value)
         }
     }
 
@@ -120,7 +122,9 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
         val set = ex.sets[index]
         if (!set.done && s.setTimer?.setKey == setKey) return finishSetTimer()
         if (set.done) {
-            update { it.updateSet(exKey, setKey) { x -> x.copy(done = false, rir = null, doneAt = null) } }
+            // An unticked timed set shows its goal again, ready for another go with the timer.
+            val timed = _exercises[ex.exerciseId]?.tracking == TrackingType.DURATION
+            update { it.updateSet(exKey, setKey) { x -> x.copy(done = false, rir = null, doneAt = null, seconds = if (timed) x.goal ?: x.seconds else x.seconds) } }
             return
         }
         val hint = suggestionFor(ex, index, _previous.value[ex.exerciseId], _exercises[ex.exerciseId], unit)
@@ -171,15 +175,25 @@ class ActiveWorkout(context: Context, private val repo: Repository, private val 
     fun skipRest() = update { it.copy(restEndsAt = null) }
 
     // ---- Set timer ----
-    /** Starts timing a duration set after the get-ready countdown from settings, replacing any rest or other set timer. */
+    /**
+     * Starts timing a duration set after the get-ready countdown from settings, replacing any rest
+     * or other set timer. The goal is the time typed into the set, else last time's; a shorter last
+     * time becomes a milestone on the way.
+     */
     fun startSetTimer(exKey: Long, setKey: Long) {
         val s = _session.value ?: return
         val ex = s.exercises.firstOrNull { it.key == exKey } ?: return
         val index = ex.sets.indexOfFirst { it.key == setKey }
         if (index < 0) return
-        val target = suggestionFor(ex, index, _previous.value[ex.exerciseId], _exercises[ex.exerciseId], unit)?.seconds
-        val timer = SetTimer(exKey, setKey, System.currentTimeMillis() + countdownSeconds.coerceAtLeast(0) * 1000L, targetSeconds = target?.takeIf { it > 0 })
-        update { it.copy(setTimer = timer, restEndsAt = null) }
+        val set = ex.sets[index]
+        val previous = _previous.value[ex.exerciseId]
+        val target = (set.seconds ?: set.goal ?: suggestionFor(ex, index, previous, _exercises[ex.exerciseId], unit)?.seconds)?.takeIf { it > 0 }
+        val last = previousFor(ex, index, previous)?.seconds
+        val timer = SetTimer(
+            exKey, setKey, System.currentTimeMillis() + countdownSeconds.coerceAtLeast(0) * 1000L,
+            targetSeconds = target, milestoneSeconds = last?.takeIf { target != null && it in 1 until target },
+        )
+        update { it.copy(setTimer = timer, restEndsAt = null).updateSet(exKey, setKey) { x -> x.copy(goal = target ?: x.goal) } }
     }
 
     /** Skips the rest of the get-ready countdown. */

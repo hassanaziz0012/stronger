@@ -116,8 +116,10 @@ data class SetTimer(
     val setKey: Long,
     val startedAt: Long,
     val pausedAt: Long? = null,
-    /** Seconds to beat, from the set's target or last time. */
+    /** Seconds to reach: what the set had typed in, else last time's. */
     val targetSeconds: Int? = null,
+    /** Last time's seconds when short of the goal: a mark to pass on the way there. */
+    val milestoneSeconds: Int? = null,
 ) {
     /** Milliseconds timed so far; negative while still counting down to the start. */
     fun elapsedMillis(now: Long): Long = (pausedAt ?: now) - startedAt
@@ -150,6 +152,13 @@ data class SessionSet(
     val doneAt: Long? = null,
     /** Reps done after each rest-pause, in order. [reps] is the total, these included. */
     val pauseReps: List<Int> = emptyList(),
+    /**
+     * What the set aimed for: the reps (seconds, for timed exercises) it started the workout with,
+     * or the goal its set timer ran to. Meeting it on every set makes the exercise ready to progress.
+     */
+    val goal: Int? = null,
+    /** The weight [goal] was to be done at; lifting less (or with more assistance) doesn't meet it. */
+    val goalKg: Double? = null,
 ) {
     /** Reps before the first rest-pause: what records and progression go by. */
     val straightReps: Int? get() = reps?.let { (it - pauseReps.sum()).coerceAtLeast(0) }

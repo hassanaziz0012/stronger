@@ -33,4 +33,5 @@ Prefer `uiautomator dump` for finding tap targets; shrink screenshots before rea
 - Weights are stored in kg; convert only for display/input.
 - Room schema changes need a version bump plus an `AutoMigration` (schemas are exported to `app/schemas`); the phone has real data.
 - `ModalBottomSheet`s with text fields need `skipPartiallyExpanded = true` and `imePadding()`, or the keyboard hides their buttons.
+- `SessionSet.goal` / `SetEntity.goal` is what a set aimed for (reps, or seconds for duration). It's captured when a workout starts and when a set timer starts, and `readyToProgress` reads it.
 - Health Connect writes use `clientRecordId`s (`workout-<id>`, `measurement-<id>`) so re-syncs replace rather than duplicate.

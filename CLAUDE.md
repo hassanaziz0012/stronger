@@ -21,6 +21,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell monkey -p app.stronger -c android.intent.category.LAUNCHER 1
 ```
 
+`scripts/release.sh` does all of this in one go (tests, release build, connect, install, launch); add `--publish` to bump the version, commit, tag, push and create the GitHub release. See `--help`. `--publish` needs a clean tree, so commit first.
+
 Prefer `uiautomator dump` for finding tap targets; shrink screenshots before reading them.
 
 ## Notes

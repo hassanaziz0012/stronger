@@ -1,5 +1,10 @@
 package app.stronger.ui.workout
 
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -153,6 +158,7 @@ fun WorkoutHomeScreen(nav: Nav) {
         )
     }?.takeIf { settings.recapDismissed != recapMonth.toString() }
     var preview by remember { mutableStateOf<TemplateEntity?>(null) }
+    var orderInfo by remember { mutableStateOf(false) }
     var pendingStart by remember { mutableStateOf<Session?>(null) }
     var deleting by remember { mutableStateOf<TemplateEntity?>(null) }
     val scope = rememberCoroutineScope()
@@ -206,6 +212,7 @@ fun WorkoutHomeScreen(nav: Nav) {
             }
             item {
                 SectionHeader("Templates") {
+                    IconButton(onClick = { orderInfo = true }) { Icon(Icons.Outlined.Info, "How templates are ordered") }
                     FilledTonalIconButton(onClick = { nav.template() }) { Icon(Icons.Filled.Add, "New template") }
                 }
             }
@@ -231,6 +238,8 @@ fun WorkoutHomeScreen(nav: Nav) {
             }
         }
     }
+
+    if (orderInfo) TemplateOrderSheet(templates.firstOrNull { it.id == upNext }?.name) { orderInfo = false }
 
     preview?.let { t ->
         TemplatePreviewSheet(
@@ -544,5 +553,40 @@ private fun RecapStat(value: String, label: String, change: String?, modifier: M
             label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** Explains "Up next": the rules in [nextTemplate], and what they say right now. */
+@Composable
+private fun TemplateOrderSheet(upNext: String?, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
+            Text("How templates are ordered", style = MaterialTheme.typography.headlineSmallEmphasized)
+            VSpace(8.dp)
+            Text(
+                "Templates are listed newest first. The one your routine says comes next is moved to the top and marked \"Up next\".",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            VSpace(16.dp)
+            listOf(
+                "Stronger looks at your last 12 workouts started from a template, within the past 8 weeks.",
+                "A template is in your rotation when you did it at least twice in those 12, and at least once in the latest 6. One-offs and templates you've dropped fall out.",
+                "The rotation template you did longest ago is up next.",
+                "It takes two or more templates in rotation. Until then nothing is moved.",
+            ).forEachIndexed { i, line ->
+                Row(Modifier.padding(vertical = 6.dp)) {
+                    Text("${i + 1}", style = MaterialTheme.typography.titleMediumEmphasized, color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(28.dp))
+                    Text(line, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            VSpace(16.dp)
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (upNext != null) "Right now: $upNext is up next."
+                    else "Right now: no rotation yet, so nothing is moved.",
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp),
+                )
+            }
+        }
     }
 }
